@@ -337,7 +337,11 @@ const App = () => {
   const isReadOnly = currentTrip && session?.user?.id !== currentTrip.owner_id;
 
   const syncSpot = async (spot) => {
-    if (!currentTrip || isReadOnly || !session?.user?.id) return;
+    // Only authenticated users can sync to the database
+    if (!currentTrip || !session?.user?.id) return;
+    
+    // In this app, we allow all authenticated users to update spots (comments, likes, etc.)
+    // as long as they are on the trip page. The RLS on the server handles the actual security.
 
     // Sanitize: Only send fields that exist in our database schema
     const dbSpot = {
@@ -611,28 +615,36 @@ const App = () => {
   };
 
   const handleUpdateSpot = (id, field, value) => {
-    if (isReadOnly) return;
+    // If the user isn't logged in, they can't save anything permanently.
+    // Locally it will still update in the state.
+    
     let updatedSpot = null;
     setTripSpots(prev => {
-      const updated = prev.map(s => {
+      return prev.map(s => {
         if (s.id === id) {
           updatedSpot = { ...s, [field]: value };
           return updatedSpot;
         }
         return s;
       });
-      return updated;
     });
 
-    // Use a small timeout or find in the current frame to avoid stale 'tripSpots'
-    // Actually, we can just use the 'updatedSpot' we captured
-    if (updatedSpot) {
+    // We use a small trick: if updatedSpot is still null (e.g. state was set but not yet updated),
+    // we find it directly from the current tripSpots.
+    // But since we are doing this synchronously, updatedSpot SHOULD be set if id matched.
+    if (!updatedSpot) {
+      const current = tripSpots.find(s => s.id === id);
+      if (current) updatedSpot = { ...current, [field]: value };
+    }
+
+    if (updatedSpot && session?.user?.id) {
       syncSpot(updatedSpot);
     }
   };
 
   const handleToggleLike = (id) => {
-    if (isReadOnly) return;
+    // Local state update is allowed for everyone. 
+    // handleUpdateSpot will check for session before calling syncSpot.
     const spot = tripSpots.find(s => s.id === id);
     if (spot) {
       handleUpdateSpot(id, 'isLiked', !spot.isLiked);
@@ -640,7 +652,7 @@ const App = () => {
   };
 
   const handleToggleBookmark = (id) => {
-    if (isReadOnly) return;
+    // Local state update is allowed for everyone.
     const spot = tripSpots.find(s => s.id === id);
     if (spot) {
       handleUpdateSpot(id, 'isBookmarked', !spot.isBookmarked);
@@ -768,7 +780,7 @@ const App = () => {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setSession(null);
-    setCurrentTrip(null);
+    // Removed setCurrentTrip(null) to keep trip visible after logout
   };
 
   const handleDownloadPhoto = async (url, filename) => {
@@ -874,7 +886,11 @@ const App = () => {
           <h1 className="logo" onClick={() => setActiveTab('feed')}>{currentTrip?.title || 'VibeTrip ✨'}</h1>
         </div>
         <div className="header-right">
-          {session && <button className="logout-btn" onClick={handleLogout} style={{ marginRight: '10px', fontSize: '13px', border: 'none', background: 'none', color: '#8e8e8e', cursor: 'pointer' }}>로그아웃</button>}
+          {session ? (
+            <button className="logout-btn" onClick={handleLogout} style={{ marginRight: '10px', fontSize: '13px', border: 'none', background: 'none', color: '#8e8e8e', cursor: 'pointer' }}>로그아웃</button>
+          ) : (
+            <button className="login-btn" onClick={handleBackToDashboard} style={{ marginRight: '10px', fontSize: '13px', border: 'none', background: '#0095f6', color: 'white', padding: '5px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>로그인</button>
+          )}
           {currentTrip && (
             <button className="share-icon-btn" onClick={handleShare}>
               <Share2 size={20} />
@@ -964,19 +980,25 @@ const App = () => {
                             ))}
                           </div>
 
-                          <div className="comment-input-area">
-                            <input
-                              id={`comment-input-${spot.id}`}
-                              className="comment-input"
-                              placeholder="댓글 달기..."
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' && e.target.value.trim()) {
-                                  handleAddComment(spot.id, e.target.value);
-                                  e.target.value = '';
-                                }
-                              }}
-                            />
-                          </div>
+                          {session ? (
+                            <div className="comment-input-area">
+                              <input
+                                id={`comment-input-${spot.id}`}
+                                className="comment-input"
+                                placeholder="댓글 달기..."
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && e.target.value.trim()) {
+                                    handleAddComment(spot.id, e.target.value);
+                                    e.target.value = '';
+                                  }
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div className="comment-input-area guest">
+                              <p className="login-hint" onClick={handleBackToDashboard} style={{ fontSize: '12px', color: '#8e8e8e', textAlign: 'center', cursor: 'pointer', margin: '8px 0' }}>로그인하고 댓글을 남겨보세요! 💬</p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
