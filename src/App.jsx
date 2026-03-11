@@ -23,6 +23,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Home, Map as MapIcon, Image as ImageIcon, SquarePlus, Heart, MessageCircle, Bookmark, Download, MapPin, Share2, TableProperties, LocateFixed, Search, GripVertical, List, Camera, Upload, Square, CheckSquare, Trash2 } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 import './index.css';
 import './Drawer.css';
 import './Dashboard.css';
@@ -1305,6 +1306,7 @@ const App = () => {
         tripTitle={currentTrip?.title || "나의 여행"}
         tripId={currentTrip?.id}
       />
+      <Analytics />
     </div>
   );
 };
