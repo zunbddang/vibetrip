@@ -147,6 +147,17 @@ const App = () => {
             .single();
           if (error) throw error;
           setCurrentTrip(data);
+
+          // Save to shared trips in localStorage if logged in and not owner
+          const currentSession = await supabase.auth.getSession();
+          const userId = currentSession.data.session?.user?.id;
+          if (userId && data.owner_id !== userId) {
+            const sharedKeys = 'vibe-trip-shared-ids';
+            const storedIds = JSON.parse(localStorage.getItem(sharedKeys) || '[]');
+            if (!storedIds.includes(id)) {
+              localStorage.setItem(sharedKeys, JSON.stringify([...storedIds, id]));
+            }
+          }
         } catch (err) {
           console.error('Error fetching shared trip:', err);
         } finally {
