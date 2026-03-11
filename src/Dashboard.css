@@ -1,0 +1,233 @@
+.dashboard-container {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 60px 20px;
+}
+
+.dashboard-header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.dashboard-header h1 {
+    font-size: 32px;
+    font-weight: 800;
+    margin-bottom: 10px;
+    background: linear-gradient(45deg, #f09433, #e6683c, #dc2743);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.back-btn {
+    background: none;
+    border: none;
+    color: #262626;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+    border-radius: 50%;
+    transition: background 0.2s;
+}
+
+.back-btn:hover {
+    background: #efefef;
+}
+
+.dashboard-header p {
+    color: #8e8e8e;
+}
+
+.create-trip-section {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 50px;
+    background: white;
+    padding: 15px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+    border: 1px solid #efefef;
+}
+
+.create-trip-section input {
+    flex: 1;
+    border: none;
+    padding: 10px;
+    font-size: 16px;
+    outline: none;
+}
+
+.create-btn {
+    background: #0095f6;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.create-btn:hover {
+    background: #1877f2;
+}
+
+.trip-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.trip-card {
+    background: white;
+    border: 1px solid #efefef;
+    border-radius: 16px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.trip-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+}
+
+.trip-card-header h3 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.status-badge.public {
+    background: #e1f5fe;
+    color: #039be5;
+}
+
+.status-badge.private {
+    background: #f5f5f5;
+    color: #757575;
+}
+
+.trip-card-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: auto;
+}
+
+.select-trip-btn {
+    flex: 1;
+    background: #fafafa;
+    border: 1px solid #dbdbdb;
+    padding: 12px;
+    border-radius: 8px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.select-trip-btn:hover {
+    background: #efefef;
+    border-color: #a8a8a8;
+}
+
+.delete-trip-btn {
+    background: #fffafa;
+    border: 1px solid #ffdde1;
+    color: #ed4956;
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.delete-trip-btn:hover {
+    background: #fee;
+    border-color: #ed4956;
+}
+
+.dashboard-share-btn {
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    color: #0284c7;
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dashboard-share-btn:hover {
+    background: #e0f2fe;
+    border-color: #0284c7;
+}
+
+.dash-share-toast {
+    position: absolute;
+    bottom: 110%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #262626;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    pointer-events: none;
+    animation: fadeInOut 0.3s ease;
+}
+
+@keyframes fadeInOut {
+    from {
+        opacity: 0;
+        transform: translate(-50%, 5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+}
+
+.empty-trips {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 100px;
+    color: #8e8e8e;
+    background: #fafafa;
+    border: 2px dashed #dbdbdb;
+    border-radius: 20px;
+}
+
+.dashboard-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 50vh;
+    color: #8e8e8e;
+    font-weight: 600;
+}

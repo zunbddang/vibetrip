@@ -1,0 +1,196 @@
+.share-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    animation: fadeIn 0.2s ease;
+}
+
+.share-modal-content {
+    background: white;
+    width: 90%;
+    max-width: 400px;
+    border-radius: 24px;
+    padding: 24px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.share-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.share-modal-header h3 {
+    font-size: 18px;
+    font-weight: 700;
+    color: #262626;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    color: #8e8e8e;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.share-trip-info {
+    background: #fafafa;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 24px;
+    border: 1px solid #efefef;
+}
+
+.share-trip-tag {
+    font-size: 10px;
+    font-weight: 800;
+    color: #0095f6;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.share-trip-info h4 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #262626;
+}
+
+.share-options-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.share-option {
+    background: none;
+    border: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.share-option:hover {
+    transform: translateY(-2px);
+}
+
+.icon-circle {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 18px;
+    color: #333;
+}
+
+.share-option span {
+    font-size: 11px;
+    color: #8e8e8e;
+    font-weight: 500;
+}
+
+/* Social Colors */
+.kakao .icon-circle {
+    background: #FEE500;
+    color: #3C1E1E;
+}
+
+.naver .icon-circle {
+    background: #03C75A;
+    color: white;
+}
+
+.instagram .icon-circle.ig {
+    background: radial-gradient(circle at 30% 107%, #fdf497 0%, #fdf497 5%, #fd5949 45%, #d6249f 60%, #285AEB 90%);
+    color: white;
+}
+
+.copy .icon-circle {
+    background: #efefef;
+    color: #262626;
+}
+
+.share-url-preview {
+    display: flex;
+    background: #f0f0f0;
+    border-radius: 8px;
+    padding: 4px;
+    gap: 4px;
+}
+
+.share-url-preview input {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: #8e8e8e;
+    outline: none;
+}
+
+.share-url-preview button {
+    background: #0095f6;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.share-url-preview button:hover {
+    background: #1877f2;
+}
+
+/* Mobile Bottom Sheet behavior */
+@media (max-width: 600px) {
+    .share-modal-content {
+        position: absolute;
+        bottom: 0;
+        width: 100%;
+        max-width: none;
+        border-radius: 24px 24px 0 0;
+        padding-bottom: 40px;
+    }
+}
