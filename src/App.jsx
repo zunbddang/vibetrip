@@ -31,7 +31,6 @@ import Auth from './Auth';
 import TripDashboard from './TripDashboard';
 import ShareModal from './ShareModal';
 
-// Sortable Row Component
 const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
   const {
     attributes,
@@ -46,62 +45,56 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    backgroundColor: isDragging ? '#fcfcfc' : 'transparent',
     zIndex: isDragging ? 10 : 1
   };
 
   return (
-    <tr ref={setNodeRef} style={style}>
-      <td className="center" {...attributes} {...listeners} style={{ cursor: 'grab' }} data-label="정렬">
+    <div ref={setNodeRef} style={style} className="modern-sheet-row">
+      <div className="row-drag" {...attributes} {...listeners}>
         <GripVertical size={16} color="#ccc" />
-      </td>
-      <td className="center" data-label="일차">
-        <input
-          type="number"
-          className="sheet-input center"
-          value={spot.day || 1}
-          onChange={(e) => handleUpdateSpot(spot.id, 'day', parseInt(e.target.value) || 1)}
-        />
-      </td>
-      <td data-label="날짜">
-        <input
-          type="date"
-          className="sheet-input"
-          value={spot.date || ''}
-          onChange={(e) => handleUpdateSpot(spot.id, 'date', e.target.value)}
-        />
-      </td>
-      <td data-label="분류">
-        <select
-          className="sheet-select"
-          value={spot.type || 'itinerary'}
-          onChange={(e) => handleUpdateSpot(spot.id, 'type', e.target.value)}
-        >
-          <option value="itinerary">일정 📍</option>
-          <option value="food">맛집 🍴</option>
-        </select>
-      </td>
-      <td data-label="장소명">
-        <input
-          type="text"
-          className="sheet-input strong"
-          value={spot.name || ''}
-          onChange={(e) => handleUpdateSpot(spot.id, 'name', e.target.value)}
-          placeholder="장소명 입력"
-        />
-      </td>
-      <td className="memo-cell" data-label="상세 메모">
-        <textarea
-          className="sheet-textarea"
-          value={spot.memo || ''}
-          onChange={(e) => handleUpdateSpot(spot.id, 'memo', e.target.value)}
-          placeholder="메모를 입력하세요..."
-        />
-      </td>
-      <td className="center" data-label="삭제">
-        <button className="delete-row-btn" onClick={() => handleDeleteRow(spot.id)}>×</button>
-      </td>
-    </tr>
+      </div>
+      
+      <div className="row-content">
+        <div className="row-main-info">
+          <div className="row-type-icon" title={spot.type === 'food' ? '맛집' : '일정'}>
+            {spot.type === 'food' ? <Camera size={16} /> : <MapPin size={16} />}
+          </div>
+          <input
+            type="text"
+            className="row-input-name"
+            value={spot.name || ''}
+            onChange={(e) => handleUpdateSpot(spot.id, 'name', e.target.value)}
+            placeholder="장소명"
+          />
+          <button className="row-delete-btn" onClick={() => handleDeleteRow(spot.id)}>×</button>
+        </div>
+        
+        <div className="row-sub-info">
+          <div className="row-meta">
+            <input
+              type="number"
+              className="row-input-day"
+              value={spot.day || 1}
+              onChange={(e) => handleUpdateSpot(spot.id, 'day', parseInt(e.target.value) || 1)}
+            />
+            <span className="row-day-label">일차</span>
+            <input
+              type="date"
+              className="row-input-date"
+              value={spot.date || ''}
+              onChange={(e) => handleUpdateSpot(spot.id, 'date', e.target.value)}
+            />
+          </div>
+          <input
+            type="text"
+            className="row-input-memo"
+            value={spot.memo || ''}
+            onChange={(e) => handleUpdateSpot(spot.id, 'memo', e.target.value)}
+            placeholder="상세 메모"
+          />
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -1217,49 +1210,40 @@ const App = () => {
         )}
 
         {activeTab === 'table' && (
-          <div className="table-view-container fade-in">
-            <div className="spreadsheet-header">
-              <h3>여행 일정 관리</h3>
+          <div className="modern-table-container fade-in">
+            <div className="modern-sheet-header">
+              <div className="header-title-group">
+                <h3>📅 여행 일정</h3>
+                <span className="spot-count">총 {tripSpots.length}개</span>
+              </div>
               {!isReadOnly && (
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="add-row-btn" onClick={handleAddRow}><SquarePlus size={16} /> 일정 추가</button>
-                </div>
+                <button className="modern-add-btn" onClick={handleAddRow}>
+                  <SquarePlus size={18} /> 일정 추가
+                </button>
               )}
             </div>
-            <div className="spreadsheet-wrapper">
+
+            <div className="modern-list-wrapper">
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <table className="spreadsheet-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: '30px' }}></th>
-                      <th style={{ width: '80px' }}>일차</th>
-                      <th style={{ width: '120px' }}>날짜</th>
-                      <th style={{ width: '100px' }}>분류</th>
-                      <th>장소명</th>
-                      <th>상세 메모</th>
-                      <th style={{ width: '40px' }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <SortableContext items={tripSpots.map(s => s.id)} strategy={verticalListSortingStrategy}>
-                      {groupSpotsByDay.map((dayData) => (
-                        <React.Fragment key={dayData.day}>
-                          <tr className="table-day-header">
-                            <td colSpan="7">
-                              <div className="day-header-content">
-                                <span>Day {dayData.day} • {dayData.date}</span>
-                                {!isReadOnly && dayData.spots.length > 1 && (
-                                  <button 
-                                    className="optimize-day-btn" 
-                                    onClick={() => handleOptimizeRoute(dayData.day)}
-                                    title="이동 거리순으로 최적으로 자동 정렬합니다"
-                                  >
-                                    <MapPin size={12} /> 동선 최적화 ✨
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
+                <div className="modern-rows-container">
+                  <SortableContext items={tripSpots.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                    {groupSpotsByDay.map((dayData) => (
+                      <div key={dayData.day} className="modern-day-group">
+                        <div className="modern-day-header">
+                          <div className="day-info">
+                            <span className="day-badge">Day {dayData.day}</span>
+                            <span className="day-date">{dayData.date}</span>
+                          </div>
+                          {!isReadOnly && dayData.spots.length > 1 && (
+                            <button 
+                              className="modern-optimize-btn" 
+                              onClick={() => handleOptimizeRoute(dayData.day)}
+                            >
+                              <MapPin size={12} /> 최적화 ✨
+                            </button>
+                          )}
+                        </div>
+                        <div className="day-spots-list">
                           {dayData.spots.map((spot) => (
                             <SortableRow 
                               key={spot.id} 
@@ -1268,17 +1252,18 @@ const App = () => {
                               handleDeleteRow={handleDeleteRow} 
                             />
                           ))}
-                        </React.Fragment>
-                      ))}
-                    </SortableContext>
-                  </tbody>
-                </table>
+                        </div>
+                      </div>
+                    ))}
+                  </SortableContext>
+                </div>
               </DndContext>
+              
               {tripSpots.length === 0 && (
-                <div className="table-empty-state">
-                  <div className="table-empty-icon">📅</div>
-                  <p>아직 추가된 일정이 없습니다.</p>
-                  <p>지도에서 장소를 검색하거나 추가해 보세요!</p>
+                <div className="modern-empty-state">
+                  <div className="empty-icon">🗺️</div>
+                  <p>아직 일정이 없습니다.</p>
+                  <span>지도에서 장소를 추가해 보세요!</span>
                 </div>
               )}
             </div>
