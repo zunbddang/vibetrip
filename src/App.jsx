@@ -52,10 +52,10 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
 
   return (
     <tr ref={setNodeRef} style={style}>
-      <td className="center" {...attributes} {...listeners} style={{ cursor: 'grab' }}>
+      <td className="center" {...attributes} {...listeners} style={{ cursor: 'grab' }} data-label="정렬">
         <GripVertical size={16} color="#ccc" />
       </td>
-      <td className="center">
+      <td className="center" data-label="일차">
         <input
           type="number"
           className="sheet-input center"
@@ -63,7 +63,7 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
           onChange={(e) => handleUpdateSpot(spot.id, 'day', parseInt(e.target.value) || 1)}
         />
       </td>
-      <td>
+      <td data-label="날짜">
         <input
           type="date"
           className="sheet-input"
@@ -71,7 +71,7 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
           onChange={(e) => handleUpdateSpot(spot.id, 'date', e.target.value)}
         />
       </td>
-      <td>
+      <td data-label="분류">
         <select
           className="sheet-select"
           value={spot.type || 'itinerary'}
@@ -81,7 +81,7 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
           <option value="food">맛집 🍴</option>
         </select>
       </td>
-      <td>
+      <td data-label="장소명">
         <input
           type="text"
           className="sheet-input strong"
@@ -90,7 +90,7 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
           placeholder="장소명 입력"
         />
       </td>
-      <td className="memo-cell">
+      <td className="memo-cell" data-label="상세 메모">
         <textarea
           className="sheet-textarea"
           value={spot.memo || ''}
@@ -98,7 +98,7 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
           placeholder="메모를 입력하세요..."
         />
       </td>
-      <td className="center">
+      <td className="center" data-label="삭제">
         <button className="delete-row-btn" onClick={() => handleDeleteRow(spot.id)}>×</button>
       </td>
     </tr>

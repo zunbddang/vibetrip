@@ -821,3 +821,133 @@ body {
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   border: none;
 }
+
+/* Mobile Responsive Sheet View */
+@media (max-width: 767px) {
+  .spreadsheet-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .spreadsheet-wrapper {
+    border: none;
+    background: transparent;
+  }
+
+  .spreadsheet-table, 
+  .spreadsheet-table thead, 
+  .spreadsheet-table tbody, 
+  .spreadsheet-table th, 
+  .spreadsheet-table td, 
+  .spreadsheet-table tr {
+    display: block;
+    width: 100%;
+  }
+
+  .spreadsheet-table thead {
+    display: none; /* Hide header on mobile */
+  }
+
+  .spreadsheet-table tr {
+    background: white;
+    margin-bottom: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    border: 1px solid #efefef;
+    overflow: hidden;
+  }
+
+  .spreadsheet-table td {
+    border-bottom: 1px solid #f8f9fa;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    position: relative;
+    text-align: right;
+  }
+
+  .spreadsheet-table td:last-child {
+    border-bottom: none;
+  }
+
+  .spreadsheet-table td:before {
+    content: attr(data-label);
+    flex: 0 0 100px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 700;
+    color: #8e8e8e;
+  }
+
+  .spreadsheet-table td .sheet-input,
+  .spreadsheet-table td .sheet-select,
+  .spreadsheet-table td .sheet-textarea {
+    flex: 1;
+    text-align: right;
+    padding: 4px;
+    border: 1px solid transparent;
+    background: transparent;
+    font-size: 14px;
+    color: #262626;
+  }
+
+  .spreadsheet-table td .sheet-input:focus,
+  .spreadsheet-table td .sheet-select:focus,
+  .spreadsheet-table td .sheet-textarea:focus {
+    background: #fafafa;
+    border-color: #dbdbdb;
+  }
+
+  /* Special handling for day/date/type to be more compact or distinctive */
+  .spreadsheet-table td[data-label="정렬"] {
+    background: #fafafa;
+    justify-content: center;
+    padding: 8px;
+    border-bottom: 1px solid #efefef;
+  }
+  .spreadsheet-table td[data-label="정렬"]:before {
+    display: none;
+  }
+
+  .spreadsheet-table td[data-label="상세 메모"] {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+  }
+  .spreadsheet-table td[data-label="상세 메모"]:before {
+    margin-bottom: 8px;
+  }
+  .spreadsheet-table td .sheet-textarea {
+    text-align: left;
+    min-height: 80px;
+  }
+
+  .table-day-header td {
+    background: #58cc02; /* Duolingo-like green for contrast */
+    color: white;
+    font-weight: 700;
+    text-align: left;
+    display: block !important;
+    padding: 10px 16px;
+  }
+  .table-day-header td:before {
+    display: none;
+  }
+
+  .day-header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .optimize-day-btn {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+}
