@@ -22,7 +22,7 @@ import {
   useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Home, Map as MapIcon, Image as ImageIcon, SquarePlus, Heart, MessageCircle, Bookmark, Download, MapPin, Share2, TableProperties, LocateFixed, Search, GripVertical, List, Camera, Upload, Square, CheckSquare, Trash2 } from 'lucide-react';
+import { Home, Map as MapIcon, Image as ImageIcon, SquarePlus, Heart, MessageCircle, Bookmark, Download, MapPin, Share2, TableProperties, LocateFixed, Search, GripVertical, List, Camera, Upload, Square, CheckSquare, Trash2, Star } from 'lucide-react';
 import './index.css';
 import './Drawer.css';
 import './Dashboard.css';
@@ -30,6 +30,21 @@ import { supabase } from './supabase';
 import Auth from './Auth';
 import TripDashboard from './TripDashboard';
 import ShareModal from './ShareModal';
+
+const DAY_COLORS = [
+  '#ed4956', // Day 1: Red
+  '#0095f6', // Day 2: Blue
+  '#16a34a', // Day 3: Green
+  '#f59e0b', // Day 4: Orange
+  '#a855f7', // Day 5: Purple
+  '#06b6d4', // Day 6: Cyan
+  '#ec4899', // Day 7: Pink
+];
+
+const getDayColor = (day) => {
+  if (!day || day < 1) return '#262626';
+  return DAY_COLORS[(day - 1) % DAY_COLORS.length];
+};
 
 const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
   const {
@@ -129,12 +144,17 @@ const App = () => {
     day: 1,
     date: new Date().toISOString().split('T')[0],
     type: 'itinerary',
-    memo: ''
+    memo: '',
+    rating: null,
+    reviews: null,
+    phone: null,
+    openingHours: null
   });
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [mapCenter, setMapCenter] = useState({ lat: 48.8566, lng: 2.3522 });
   const [mapZoom, setMapZoom] = useState(12);
   const [userLocation, setUserLocation] = useState(null);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
   const mapSearchRef = useRef(null);
 
   // Handle URL Sharing
@@ -430,7 +450,11 @@ const App = () => {
         day: selectedSpot.day || 1,
         date: selectedSpot.date || new Date().toISOString().split('T')[0],
         type: selectedSpot.type || 'itinerary',
-        memo: selectedSpot.memo || ''
+        memo: selectedSpot.memo || '',
+        rating: selectedSpot.rating || null,
+        reviews: selectedSpot.reviews || null,
+        phone: selectedSpot.phone || null,
+        openingHours: selectedSpot.openingHours || null
       });
     }
   }, [selectedSpot]);
@@ -454,6 +478,22 @@ const App = () => {
       return () => navigator.geolocation.clearWatch(watchId);
     }
   }, []);
+
+  // Keyboard navigation for Lightbox
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (lightboxIndex === null) return;
+      if (e.key === 'Escape') setLightboxIndex(null);
+      if (e.key === 'ArrowRight') {
+        setLightboxIndex(prev => (prev + 1) % tripPhotos.length);
+      }
+      if (e.key === 'ArrowLeft') {
+        setLightboxIndex(prev => (prev - 1 + tripPhotos.length) % tripPhotos.length);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lightboxIndex, tripPhotos]);
 
   const handleCenterOnMe = () => {
     if (userLocation && map) {
@@ -576,7 +616,11 @@ const App = () => {
                   memo: place.formatted_address,
                   photoUrl: photoUrl,
                   lat: place.geometry.location.lat(),
-                  lng: place.geometry.location.lng()
+                  lng: place.geometry.location.lng(),
+                  rating: place.rating,
+                  reviews: place.user_ratings_total,
+                  phone: place.formatted_phone_number,
+                  openingHours: place.opening_hours?.weekday_text
                 };
               }
               return prev;
@@ -791,12 +835,12 @@ const App = () => {
   const handleAddRow = () => {
     if (isReadOnly) return;
     const newSpot = {
-      id: Date.now(),
+      id: 'temp-' + Date.now(),
       day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
       date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0],
-      name: "New Place",
-      lat: 48.8566,
-      lng: 2.3522,
+      name: "새로운 장소",
+      lat: mapCenter.lat,
+      lng: mapCenter.lng,
       type: 'itinerary',
       memo: '',
       isLiked: false,
@@ -825,16 +869,21 @@ const App = () => {
   }, [tripSpots, selectedDay]);
 
   const uniqueDays = useMemo(() => {
-    const days = [...new Set(tripSpots.map(s => s.day))].filter(d => d !== null && d !== undefined);
+    const days = [...new Set((tripSpots || []).map(s => Number(s.day)))].filter(d => !isNaN(d) && d !== null);
     return days.sort((a, b) => a - b);
   }, [tripSpots]);
 
   const participants = useMemo(() => {
     const names = new Set();
+    // Add owner to participants list
+    if (currentTrip?.owner_id) {
+        // We might not have the email easily, but we can at least show 'Owner' or fetch it.
+        // For now, let's stick to uploaders from spots/photos as primary.
+    }
     tripSpots.forEach(s => s.uploaderName && names.add(s.uploaderName));
     tripPhotos.forEach(p => p.uploader_name && names.add(p.uploader_name));
     return [...names].filter(n => n && n !== '익명');
-  }, [tripSpots, tripPhotos]);
+  }, [tripSpots, tripPhotos, currentTrip]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -1125,9 +1174,9 @@ const App = () => {
           </div>
         )}
 
-        {activeTab === 'map' && isLoaded && (
+        {activeTab === 'map' && (
           <div className="map-view-container fade-in">
-            <div className="map-wrapper">
+            <div className={`map-wrapper ${isLoaded ? 'loaded' : ''}`}>
               <div className="map-search-overlay">
                 <Autocomplete onLoad={onMapSearchLoad} onPlaceChanged={onMapPlaceChanged}>
                   <div className="map-search-box">
@@ -1171,6 +1220,15 @@ const App = () => {
                     key={spot.id}
                     position={{ lat: spot.lat, lng: spot.lng }}
                     label={{ text: String(idx + 1), color: "white", fontWeight: "bold" }}
+                    icon={(window.google && window.google.maps) ? {
+                      path: "M 0,0 C -2,-20 -10,-22 -10,-30 A 10,10 0 1,1 10,-30 C 10,-22 2,-20 0,0 z",
+                      fillColor: getDayColor(spot.day),
+                      fillOpacity: 1,
+                      strokeWeight: 2,
+                      strokeColor: "white",
+                      scale: 1,
+                      labelOrigin: new window.google.maps.Point(0, -30)
+                    } : undefined}
                     onClick={() => {
                       setSelectedSpot(spot);
                       setSearchedPlace(null);
@@ -1234,7 +1292,26 @@ const App = () => {
                       )
                     )}
                   </div>
-                  <div className="drawer-info"><h4 className="drawer-title">{selectedSpot.name}</h4><p className="drawer-address">{selectedSpot.memo}</p></div>
+                  <div className="drawer-info">
+                    <h4 className="drawer-title">{selectedSpot.name}</h4>
+                    {selectedSpot.rating && (
+                      <div className="drawer-rating">
+                        <Star size={14} fill="#f59e0b" color="#f59e0b" />
+                        <span className="rating-score">{selectedSpot.rating}</span>
+                        <span className="rating-count">({selectedSpot.reviews})</span>
+                      </div>
+                    )}
+                    <p className="drawer-address">{selectedSpot.memo}</p>
+                    {selectedSpot.phone && <div className="drawer-meta-item"><span className="meta-label">전화:</span> {selectedSpot.phone}</div>}
+                    {selectedSpot.openingHours && Array.isArray(selectedSpot.openingHours) && (
+                      <div className="drawer-opening-hours">
+                        <span className="meta-label">영업시간:</span>
+                        <ul>
+                          {selectedSpot.openingHours.map((line, idx) => <li key={idx}>{line}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
                   <div className="drawer-form">
                     <div className="drawer-row">
                       <div className="drawer-group"><label>일차</label><input type="number" className="drawer-input" value={formInput.day} onChange={(e) => setFormInput(prev => ({ ...prev, day: parseInt(e.target.value) || 1 }))} disabled={isReadOnly} /></div>
@@ -1287,7 +1364,7 @@ const App = () => {
             <div className="gallery-header">
               <div className="gallery-stats">
                 <h3>📜 Memory Lane</h3>
-                <span>총 {tripSpots.filter(s => s.photoUrl).length}개의 추억</span>
+                <span>총 {(tripSpots || []).filter(s => s.photoUrl).length}개의 추억</span>
               </div>
               <div className="gallery-actions">
                 {selectedPhotos.length > 0 && (
@@ -1328,22 +1405,26 @@ const App = () => {
             </div>
 
             <div className="gallery-grid">
-              {tripPhotos.map((photo) => (
-                <div key={photo.id} className={`gallery-item ${selectedPhotos.includes(photo.id) ? 'selected' : ''}`}>
-                  <img src={photo.url} alt="Trip memory" onClick={() => togglePhotoSelection(photo.id)} />
+              {tripPhotos.map((photo, idx) => (
+                <div 
+                  key={photo.id} 
+                  className={`gallery-item ${selectedPhotos.includes(photo.id) ? 'selected' : ''}`}
+                  onClick={() => setLightboxIndex(idx)}
+                >
+                  <img src={photo.url} alt="Trip memory" />
                   
                   <div className="gallery-item-overlay">
                     <div className="uploader-tag">@{photo.uploader_name || '익명'}</div>
-                    <div className="gallery-item-actions">
+                    <div className="gallery-item-actions" onClick={e => e.stopPropagation()}>
                       {!isReadOnly && (
-                        <button onClick={() => handleDeletePhoto(photo)} style={{ color: '#ed4956' }}>
+                        <button onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo); }} style={{ color: '#ed4956' }}>
                           <Trash2 size={16} />
                         </button>
                       )}
-                      <button onClick={() => handleDownloadPhoto(photo.url, `vibe-trip-${photo.id}.jpg`)}>
+                      <button onClick={(e) => { e.stopPropagation(); handleDownloadPhoto(photo.url, `vibe-trip-${photo.id}.jpg`); }}>
                         <Download size={16} />
                       </button>
-                      <button onClick={() => togglePhotoSelection(photo.id)}>
+                      <button onClick={(e) => { e.stopPropagation(); togglePhotoSelection(photo.id); }}>
                         {selectedPhotos.includes(photo.id) ? <CheckSquare size={16} color="#3897f0" /> : <Square size={16} />}
                       </button>
                     </div>
@@ -1378,7 +1459,10 @@ const App = () => {
             <div className="modern-list-wrapper">
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <div className="modern-rows-container">
-                  <SortableContext items={tripSpots.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                  <SortableContext 
+                    items={tripSpots.filter(s => selectedDay === null || String(s.day) === String(selectedDay)).map(s => s.id)} 
+                    strategy={verticalListSortingStrategy}
+                  >
                     {groupSpotsByDay.map((dayData) => (
                       <div key={dayData.day} className="modern-day-group">
                         <div className="modern-day-header">
@@ -1435,6 +1519,37 @@ const App = () => {
         tripTitle={currentTrip?.title || "나의 여행"}
         tripId={currentTrip?.id}
       />
+      
+      {lightboxIndex !== null && tripPhotos[lightboxIndex] && (
+        <div className="lightbox-overlay" onClick={() => setLightboxIndex(null)}>
+          <div className="lightbox-content" onClick={e => e.stopPropagation()}>
+            <img src={tripPhotos[lightboxIndex].url} alt="Lightbox view" className="lightbox-main-img" />
+            
+            <button className="lightbox-nav-btn prev" onClick={() => setLightboxIndex((lightboxIndex - 1 + tripPhotos.length) % tripPhotos.length)}>
+              ‹
+            </button>
+            <button className="lightbox-nav-btn next" onClick={() => setLightboxIndex((lightboxIndex + 1) % tripPhotos.length)}>
+              ›
+            </button>
+
+            <div className="lightbox-top-actions">
+              <button className="lightbox-action-btn close" onClick={() => setLightboxIndex(null)}>×</button>
+            </div>
+            
+            <div className="lightbox-center-actions">
+               <button className="lightbox-download-hub" onClick={() => handleDownloadPhoto(tripPhotos[lightboxIndex].url, `vibe-trip-${tripPhotos[lightboxIndex].id}.jpg`)}>
+                <Download size={24} />
+                <span>선명하게 저장하기</span>
+              </button>
+            </div>
+
+            <div className="lightbox-bottom-info">
+              <span className="uploader">@{tripPhotos[lightboxIndex].uploader_name || '익명'}님의 소중한 추억</span>
+              <span className="counter">{lightboxIndex + 1} / {tripPhotos.length}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
