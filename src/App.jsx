@@ -351,8 +351,8 @@ const App = () => {
     // Only authenticated users can sync to the database
     if (!currentTrip || !session?.user?.id) return;
     
-    // In this app, we allow all authenticated users to update spots (comments, likes, etc.)
-    // as long as they are on the trip page. The RLS on the server handles the actual security.
+    // Check if the spot already exists in the database (to handle ownership and IDs)
+    const isPermanentId = spot.id && !String(spot.id).startsWith('temp-');
 
     // Sanitize: Only send fields that exist in our database schema
     const dbSpot = {
@@ -365,16 +365,20 @@ const App = () => {
       day: spot.day || 1,
       date: spot.date,
       trip_id: currentTrip.id,
-      user_id: session.user.id,
+      is_liked: spot.isLiked || false,
       is_bookmarked: spot.isBookmarked || false,
       comments: spot.comments || [],
       order_index: spot.orderIndex || 0,
       uploader_name: spot.uploaderName || session.user.email.split('@')[0]
     };
 
-    // If spot.id is a real database ID (integer), include it for update
-    if (spot.id && typeof spot.id === 'number' && spot.id < 1000000000000) {
+    // If it's an update, preserve the original uploader's user_id
+    // If it's a new spot, set the current user as owner
+    if (isPermanentId) {
       dbSpot.id = spot.id;
+      // Note: We don't overwrite user_id on update to preserve original uploader
+    } else {
+      dbSpot.user_id = session.user.id;
     }
 
     try {
@@ -386,8 +390,8 @@ const App = () => {
       if (error) throw error;
 
       // If it's a new spot, update its ID in local state with the DB-assigned ID
-      if (data && data[0] && (!spot.id || spot.id >= 1000000000000)) {
-        setTripSpots(prev => prev.map(s => s.id === spot.id ? { ...s, id: data[0].id } : s));
+      if (data && data[0] && !isPermanentId) {
+        setTripSpots(prev => prev.map(s => s.id === spot.id ? { ...s, id: data[0].id, user_id: data[0].user_id } : s));
       }
     } catch (err) {
       console.error('Error syncing spot:', err);
