@@ -993,7 +993,7 @@ const App = () => {
       <main style={{ flex: 1, overflowY: 'auto' }}>
         {isLoading && <div className="loading-overlay"><div className="spinner"></div><span>불러오는 중...</span></div>}
 
-        {currentTrip && tripSpots.length > 0 && (
+        {currentTrip && tripSpots.length > 0 && activeTab !== 'gallery' && (
           <div className="day-selector-container">
             <button 
               className={`day-tab ${selectedDay === null ? 'active' : ''}`} 
