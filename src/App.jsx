@@ -56,8 +56,12 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
       
       <div className="row-content">
         <div className="row-main-info">
-          <div className="row-type-icon" title={spot.type === 'food' ? '맛집' : '일정'}>
-            {spot.type === 'food' ? <Camera size={16} /> : <MapPin size={16} />}
+          <div className="row-type-icon" title={spot.type}>
+            {spot.type === 'food' ? <Heart size={16} fill="#ed4956" color="#ed4956" /> : 
+             spot.type === 'hotel' ? <Home size={16} color="#0095f6" /> :
+             spot.type === 'landmark' ? <MapPin size={16} color="#16a34a" /> :
+             spot.type === 'transport' ? <LocateFixed size={16} color="#8e8e8e" /> :
+             <MapPin size={16} />}
           </div>
           <input
             type="text"
@@ -113,6 +117,7 @@ const App = () => {
   const [session, setSession] = useState(null);
   const [currentTrip, setCurrentTrip] = useState(null);
   const [activeTab, setActiveTab] = useState('feed');
+  const [selectedDay, setSelectedDay] = useState(null); // null for 'All'
   const [tripSpots, setTripSpots] = useState([]);
   const [tripPhotos, setTripPhotos] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -305,9 +310,26 @@ const App = () => {
       )
       .subscribe();
 
+    const tripChannel = supabase
+      .channel(`trip-meta-${currentTrip.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'trips',
+          filter: `id=eq.${currentTrip.id}`
+        },
+        (payload) => {
+          setCurrentTrip(payload.new);
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(spotsChannel);
       supabase.removeChannel(photosChannel);
+      supabase.removeChannel(tripChannel);
     };
   }, [currentTrip]);
 
@@ -339,7 +361,10 @@ const App = () => {
       }
     } catch (err) {
       console.error('Error uploading image:', err);
-      alert('이미지 업로드 실패: ' + err.message);
+      let errorMsg = '이미지 업로드에 실패했습니다.';
+      if (err.message.includes('storage/quota-exceeded')) errorMsg = '저장 공간이 부족합니다.';
+      else if (err.message.includes('auth')) errorMsg = '인증 세션이 만료되었습니다. 다시 로그인해주세요.';
+      alert(errorMsg + '\n(Error: ' + err.message + ')');
     } finally {
       setIsLoading(false);
     }
@@ -789,8 +814,27 @@ const App = () => {
       if (!groups[spot.day]) groups[spot.day] = { day: spot.day, date: spot.date, spots: [] };
       groups[spot.day].spots.push(spot);
     });
-    return Object.values(groups).sort((a, b) => a.day - b.day);
+    
+    let result = Object.values(groups).sort((a, b) => a.day - b.day);
+    
+    if (selectedDay !== null) {
+      result = result.filter(g => g.day === selectedDay);
+    }
+    
+    return result;
+  }, [tripSpots, selectedDay]);
+
+  const uniqueDays = useMemo(() => {
+    const days = [...new Set(tripSpots.map(s => s.day))].filter(d => d !== null && d !== undefined);
+    return days.sort((a, b) => a - b);
   }, [tripSpots]);
+
+  const participants = useMemo(() => {
+    const names = new Set();
+    tripSpots.forEach(s => s.uploaderName && names.add(s.uploaderName));
+    tripPhotos.forEach(p => p.uploader_name && names.add(p.uploader_name));
+    return [...names].filter(n => n && n !== '익명');
+  }, [tripSpots, tripPhotos]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -865,8 +909,31 @@ const App = () => {
       setTripSpots((items) => {
         const oldIndex = items.findIndex((i) => i.id === active.id);
         const newIndex = items.findIndex((i) => i.id === over.id);
+        
         if (oldIndex !== -1 && newIndex !== -1) {
-          return arrayMove(items, oldIndex, newIndex);
+          const newItems = arrayMove(items, oldIndex, newIndex);
+          
+          // Re-calibrate orderIndex for ALL items to be safe, 
+          // or at least those in the same group. 
+          // For simplicity and reliability, we sync the moved items.
+          const updatedItems = newItems.map((item, index) => ({
+            ...item,
+            orderIndex: index
+          }));
+
+          // Only sync those that actually changed or just the affected range.
+          // For now, syncing the ones that were moved is good.
+          // But to be 100% sure the DB matches the UI:
+          if (!isReadOnly) {
+            updatedItems.forEach((item, idx) => {
+              // We only sync if the orderIndex actually changed or it's the active/over item
+              if (items[idx]?.id !== updatedItems[idx]?.id || items[idx]?.orderIndex !== idx) {
+                syncSpot(updatedItems[idx]);
+              }
+            });
+          }
+          
+          return updatedItems;
         }
         return items;
       });
@@ -901,6 +968,15 @@ const App = () => {
           <h1 className="logo" onClick={() => setActiveTab('feed')}>{currentTrip?.title || 'VibeTrip ✨'}</h1>
         </div>
         <div className="header-right">
+          {participants.length > 0 && (
+            <div className="participants-list" title="참여 중인 친구들">
+              {participants.map(name => (
+                <div key={name} className="participant-dot" title={name}>
+                  {name.charAt(0).toUpperCase()}
+                </div>
+              ))}
+            </div>
+          )}
           {session ? (
             <button className="logout-btn" onClick={handleLogout} style={{ marginRight: '10px', fontSize: '13px', border: 'none', background: 'none', color: '#8e8e8e', cursor: 'pointer' }}>로그아웃</button>
           ) : (
@@ -916,6 +992,26 @@ const App = () => {
 
       <main style={{ flex: 1, overflowY: 'auto' }}>
         {isLoading && <div className="loading-overlay"><div className="spinner"></div><span>불러오는 중...</span></div>}
+
+        {currentTrip && tripSpots.length > 0 && (
+          <div className="day-selector-container">
+            <button 
+              className={`day-tab ${selectedDay === null ? 'active' : ''}`} 
+              onClick={() => setSelectedDay(null)}
+            >
+              전체
+            </button>
+            {uniqueDays.map(day => (
+              <button 
+                key={day} 
+                className={`day-tab ${selectedDay === day ? 'active' : ''}`}
+                onClick={() => setSelectedDay(day)}
+              >
+                Day {day}
+              </button>
+            ))}
+          </div>
+        )}
 
         {activeTab === 'feed' && (
           <div className="feed-container fade-in">
@@ -972,7 +1068,12 @@ const App = () => {
                         <div className="post-caption">
                           <div className="caption-content">
                             <span className="post-username-small">{spot.name}</span>
-                            <span className="type-tag-mini">{spot.type === 'food' ? '🍴 맛집' : '📍 일정'}</span>
+                            <span className="type-tag-mini">
+                              {spot.type === 'food' ? '🍴 맛집' : 
+                               spot.type === 'hotel' ? '🏨 숙소' :
+                               spot.type === 'landmark' ? '📍 관광' :
+                               spot.type === 'transport' ? '🚌 교통' : '📍 일정'}
+                            </span>
                             <div className="memo-text">{spot.memo}</div>
                           </div>
 
@@ -1065,7 +1166,7 @@ const App = () => {
                 onZoomChanged={() => map && setMapZoom(map.getZoom())}
                 options={{ disableDefaultUI: true, zoomControl: true, clickableIcons: true }}
               >
-                {tripSpots.map((spot, idx) => (
+                {tripSpots.filter(s => selectedDay === null || s.day === selectedDay).map((spot, idx) => (
                   <Marker
                     key={spot.id}
                     position={{ lat: spot.lat, lng: spot.lng }}
@@ -1139,7 +1240,21 @@ const App = () => {
                       <div className="drawer-group"><label>일차</label><input type="number" className="drawer-input" value={formInput.day} onChange={(e) => setFormInput(prev => ({ ...prev, day: parseInt(e.target.value) || 1 }))} disabled={isReadOnly} /></div>
                       <div className="drawer-group"><label>날짜</label><input type="date" className="drawer-input" value={formInput.date} onChange={(e) => setFormInput(prev => ({ ...prev, date: e.target.value }))} disabled={isReadOnly} /></div>
                     </div>
-                    <div className="drawer-group"><label>분류</label><select className="drawer-select" value={formInput.type} onChange={(e) => setFormInput(prev => ({ ...prev, type: e.target.value }))} disabled={isReadOnly}><option value="itinerary">일정 📍</option><option value="food">맛집 🍴</option></select></div>
+                    <div className="drawer-group">
+                      <label>분류</label>
+                      <select 
+                        className="drawer-select" 
+                        value={formInput.type} 
+                        onChange={(e) => setFormInput(prev => ({ ...prev, type: e.target.value }))} 
+                        disabled={isReadOnly}
+                      >
+                        <option value="itinerary">일정 📍</option>
+                        <option value="food">맛집 🍴</option>
+                        <option value="hotel">숙소 🏨</option>
+                        <option value="landmark">관광 🏛️</option>
+                        <option value="transport">교통 🚌</option>
+                      </select>
+                    </div>
                     <div className="drawer-group"><label>상세 메모</label><textarea className="drawer-textarea" placeholder="이 장소에서 무엇을 할까요?" value={formInput.memo} onChange={(e) => setFormInput(prev => ({ ...prev, memo: e.target.value }))} disabled={isReadOnly} /></div>
                   </div>
                   {!isReadOnly && (

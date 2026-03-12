@@ -126,6 +126,68 @@
     cursor: not-allowed;
 }
 
+.dashboard-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+    gap: 15px;
+}
+
+.search-box {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: white;
+    padding: 10px 15px;
+    border-radius: 10px;
+    border: 1px solid #efefef;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.search-box input {
+    border: none;
+    outline: none;
+    width: 100%;
+    font-size: 14px;
+    color: #262626;
+    background: transparent;
+}
+
+.search-box input::placeholder {
+    color: #c7c7c7;
+}
+
+.sort-select {
+    padding: 10px 15px;
+    border-radius: 10px;
+    border: 1px solid #efefef;
+    background: white;
+    font-size: 14px;
+    font-weight: 600;
+    color: #262626;
+    outline: none;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+    transition: all 0.2s;
+}
+
+.sort-select:hover {
+    border-color: #dbdbdb;
+}
+
+.edit-title-input {
+    font-size: 18px;
+    font-weight: 700;
+    border: 2px solid #0095f6;
+    border-radius: 4px;
+    padding: 2px 5px;
+    width: 100%;
+    outline: none;
+    font-family: inherit;
+}
+
 .trip-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

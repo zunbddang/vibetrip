@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { Plus, Globe, Lock, Trash2, ArrowRight, Share2 } from 'lucide-react';
+import { Plus, Globe, Lock, Trash2, ArrowRight, Share2, Search } from 'lucide-react';
 import './Dashboard.css';
 import ShareModal from './ShareModal';
 
@@ -8,6 +8,10 @@ const TripDashboard = ({ session, onSelectTrip }) => {
     const [trips, setTrips] = useState([]);
     const [newTripTitle, setNewTripTitle] = useState('');
     const [sharedLink, setSharedLink] = useState('');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [sortBy, setSortBy] = useState('newest');
+    const [editTripId, setEditTripId] = useState(null);
+    const [editTitle, setEditTitle] = useState('');
     const [loading, setLoading] = useState(true);
     const [creating, setCreating] = useState(false);
     const [addingShared, setAddingShared] = useState(false);
@@ -130,6 +134,22 @@ const TripDashboard = ({ session, onSelectTrip }) => {
         }
     };
 
+    const saveRename = async (id) => {
+        if (!editTitle.trim()) return setEditTripId(null);
+        try {
+            const { error } = await supabase
+                .from('trips')
+                .update({ title: editTitle })
+                .eq('id', id);
+
+            if (error) throw error;
+            setTrips(trips.map(t => t.id === id ? { ...t, title: editTitle } : t));
+            setEditTripId(null);
+        } catch (err) {
+            alert('제목 수정 실패');
+        }
+    };
+
     const togglePublic = async (trip) => {
         if (trip.owner_id !== session.user.id) return;
         try {
@@ -178,6 +198,13 @@ const TripDashboard = ({ session, onSelectTrip }) => {
     const handleShare = (trip) => {
         setShareTrip(trip);
     };
+
+    const filteredTrips = trips
+        .filter(trip => trip.title.toLowerCase().includes(searchTerm.toLowerCase()))
+        .sort((a, b) => {
+            if (sortBy === 'newest') return new Date(b.created_at) - new Date(a.created_at);
+            return new Date(a.created_at) - new Date(b.created_at);
+        });
 
     if (loading) return <div className="dashboard-loading">불러오는 중...</div>;
 
@@ -230,16 +257,53 @@ const TripDashboard = ({ session, onSelectTrip }) => {
                 </div>
             </div>
 
+            <div className="dashboard-controls">
+                <div className="search-box">
+                    <Search size={18} />
+                    <input 
+                        type="text" 
+                        placeholder="여행 제목 검색..." 
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
+                <select className="sort-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                    <option value="newest">최신순</option>
+                    <option value="oldest">오래된순</option>
+                </select>
+            </div>
+
             <div className="trip-grid">
-                {trips.length === 0 ? (
-                    <div className="empty-trips">아직 등록된 여행이 없습니다.</div>
+                {filteredTrips.length === 0 ? (
+                    <div className="empty-trips">
+                        {searchTerm ? '검색 결과가 없습니다.' : '아직 등록된 여행이 없습니다.'}
+                    </div>
                 ) : (
-                    trips.map(trip => {
+                    filteredTrips.map(trip => {
                         const isOwner = trip.owner_id === session.user.id;
                         return (
                             <div key={trip.id} className="trip-card">
                                 <div className="trip-card-header">
-                                    <h3>{trip.title}</h3>
+                                    {editTripId === trip.id ? (
+                                        <input
+                                            type="text"
+                                            className="edit-title-input"
+                                            value={editTitle}
+                                            autoFocus
+                                            onChange={(e) => setEditTitle(e.target.value)}
+                                            onBlur={() => saveRename(trip.id)}
+                                            onKeyPress={(e) => e.key === 'Enter' && saveRename(trip.id)}
+                                        />
+                                    ) : (
+                                        <h3 onClick={() => {
+                                            if (isOwner) {
+                                                setEditTripId(trip.id);
+                                                setEditTitle(trip.title);
+                                            }
+                                        }}>
+                                            {trip.title}
+                                        </h3>
+                                    )}
                                     <div className="trip-meta">
                                         {isOwner ? (
                                             <span className={`status-badge ${trip.is_public ? 'public' : 'private'}`} onClick={() => togglePublic(trip)}>
