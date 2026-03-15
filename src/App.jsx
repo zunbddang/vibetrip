@@ -155,6 +155,7 @@ const App = () => {
   const [mapZoom, setMapZoom] = useState(12);
   const [userLocation, setUserLocation] = useState(null);
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [heartPopId, setHeartPopId] = useState(null); // For double-tap like animation
   const mapSearchRef = useRef(null);
 
   // Handle URL Sharing
@@ -832,6 +833,12 @@ const App = () => {
     }
   };
 
+  const handleDoubleClick = (spotId) => {
+    handleToggleLike(spotId);
+    setHeartPopId(spotId);
+    setTimeout(() => setHeartPopId(null), 800);
+  };
+
   const handleAddRow = () => {
     if (isReadOnly) return;
     const newSpot = {
@@ -892,20 +899,36 @@ const App = () => {
   };
 
   const handleDownloadPhoto = async (url, filename) => {
+    const name = filename || 'vibe-trip-photo.jpg';
     try {
       const response = await fetch(url);
       const blob = await response.blob();
+
+      // Mobile: Use Web Share API to open native share sheet (iOS "Save to Photos", Android "Gallery")
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: blob.type })] })) {
+        const file = new File([blob], name, { type: blob.type });
+        await navigator.share({
+          files: [file],
+          title: 'VibeTrip 여행 사진',
+          text: '소중한 추억을 저장해보세요 📸',
+        });
+        return;
+      }
+
+      // Desktop / fallback: standard download
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = filename || 'vibe-trip-photo.jpg';
+      link.download = name;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
     } catch (err) {
+      if (err.name === 'AbortError') return; // User cancelled share sheet — not an error
       console.error('Download failed:', err);
-      alert('다운로드 중 오류가 발생했습니다.');
+      // Last resort: open image in new tab so user can long-press save on mobile
+      window.open(url, '_blank');
     }
   };
 
@@ -1090,8 +1113,17 @@ const App = () => {
                           <div className="post-avatar">{currentIndex}</div>
                           <div className="post-username">{spot.name}</div>
                         </div>
-                        <div className="post-image" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f5' }}>
+                        <div 
+                          className="post-image" 
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f5', position: 'relative' }}
+                          onDoubleClick={() => handleDoubleClick(spot.id)}
+                        >
                           {spot.photoUrl ? <img src={spot.photoUrl} alt={spot.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <MapPin size={48} color="#ccc" />}
+                          {heartPopId === spot.id && (
+                            <div className="heart-pop-overlay">
+                              <Heart size={70} fill="white" color="white" className="heart-pop-anim" />
+                            </div>
+                          )}
                         </div>
                         <div className="post-actions">
                           <Heart
@@ -1213,7 +1245,24 @@ const App = () => {
                 onClick={onMapClick}
                 onDragEnd={() => map && setMapCenter({ lat: map.getCenter().lat(), lng: map.getCenter().lng() })}
                 onZoomChanged={() => map && setMapZoom(map.getZoom())}
-                options={{ disableDefaultUI: true, zoomControl: true, clickableIcons: true }}
+                options={{ 
+                  disableDefaultUI: true, 
+                  zoomControl: true, 
+                  clickableIcons: true,
+                  styles: [
+                    { elementType: 'geometry', stylers: [{ color: '#f5f5f5' }] },
+                    { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+                    { elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
+                    { elementType: 'labels.text.stroke', stylers: [{ color: '#f5f5f5' }] },
+                    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
+                    { featureType: 'road.arterial', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
+                    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#dadada' }] },
+                    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9c9c9' }] },
+                    { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#9e9e9e' }] },
+                    { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+                    { featureType: 'transit', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+                  ]
+                }}
               >
                 {tripSpots.filter(s => selectedDay === null || s.day === selectedDay).map((spot, idx) => (
                   <Marker

@@ -48,43 +48,48 @@ body {
 }
 
 .day-selector-container {
-    display: flex;
-    overflow-x: auto;
-    padding: 12px 16px;
-    gap: 8px;
-    background: white;
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    border-bottom: 1px solid #efefef;
-    scrollbar-width: none;
+  display: flex;
+  overflow-x: auto;
+  padding: 10px 16px;
+  gap: 8px;
+  background: white;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid #efefef;
+  scrollbar-width: none;
+  align-items: center;
 }
 
 .day-selector-container::-webkit-scrollbar {
-    display: none;
+  display: none;
 }
 
 .day-tab {
-    padding: 6px 14px;
-    border-radius: 16px;
-    background: #f5f5f5;
-    border: 1px solid transparent;
-    font-size: 13px;
-    font-weight: 600;
-    color: #8e8e8e;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.2s;
+  padding: 7px 16px;
+  border-radius: 20px;
+  background: #f5f5f5;
+  border: 1.5px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: #8e8e8e;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
 }
 
 .day-tab:hover {
-    background: #efefef;
+  background: #efefef;
+  transform: translateY(-1px);
 }
 
 .day-tab.active {
-    background: #0095f6;
-    color: white;
-    box-shadow: 0 4px 10px rgba(0, 149, 246, 0.2);
+  background: linear-gradient(135deg, #0095f6, #00b4ff);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(0, 149, 246, 0.35);
+  transform: translateY(-2px);
 }
 
 .logo {
