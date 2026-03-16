@@ -22,7 +22,8 @@ import {
   useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Home, Map as MapIcon, Image as ImageIcon, SquarePlus, Heart, MessageCircle, Bookmark, Download, MapPin, Share2, TableProperties, LocateFixed, Search, GripVertical, List, Camera, Upload, Square, CheckSquare, Trash2, Star } from 'lucide-react';
+import EXIF from 'exif-js';
+import { Home, Map as MapIcon, Image as ImageIcon, SquarePlus, Heart, MessageCircle, Bookmark, Download, MapPin, Share2, TableProperties, LocateFixed, Search, GripVertical, List, Camera, Upload, Square, CheckSquare, Trash2, Star, Calendar } from 'lucide-react';
 import './index.css';
 import './Drawer.css';
 import './Dashboard.css';
@@ -1077,6 +1078,48 @@ const App = () => {
     window.history.pushState({}, '', url);
   };
 
+  const handleUpdateTrip = async (updates) => {
+    if (isReadOnly) return;
+    try {
+      const { error } = await supabase.from('trips').update(updates).eq('id', currentTrip.id);
+      if (error) throw error;
+      setCurrentTrip(prev => ({ ...prev, ...updates }));
+    } catch (err) {
+      console.error('Update trip failed:', err);
+      // Fallback: Just update locally if DB update fails (e.g. column missing)
+      setCurrentTrip(prev => ({ ...prev, ...updates }));
+    }
+  };
+
+  const groupedPhotos = useMemo(() => {
+    const groups = {};
+    (tripPhotos || []).forEach(photo => {
+      const date = photo.taken_at ? photo.taken_at.split('T')[0] : '전체';
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(photo);
+    });
+    return Object.entries(groups).sort((a, b) => {
+      if (a[0] === '전체') return 1;
+      if (b[0] === '전체') return -1;
+      return b[0].localeCompare(a[0]);
+    });
+  }, [tripPhotos]);
+
+  const getDayNumber = (takenAt) => {
+    if (!currentTrip?.start_date || !takenAt) return null;
+    const start = new Date(currentTrip.start_date);
+    start.setHours(0, 0, 0, 0);
+    const taken = new Date(takenAt);
+    taken.setHours(0, 0, 0, 0);
+    
+    const diffTime = taken - start;
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    
+    if (diffDays < 1) return "여행 전";
+    if (diffDays > 31) return "여행 한참 후"; // Limit Day X to a reasonable month for now
+    return `Day ${diffDays}`;
+  };
+
   const handleDragEnd = (event) => {
     const { active, over } = event;
     if (active && over && active.id !== over.id) {
@@ -1542,22 +1585,54 @@ const App = () => {
                     const files = Array.from(e.target.files);
                     if (files.length === 0) return;
                     setIsLoading(true);
+                    
+                    const extractTakenDate = (file) => {
+                      return new Promise((resolve) => {
+                        EXIF.getData(file, function() {
+                          const dateTime = EXIF.getTag(this, "DateTimeOriginal");
+                          if (dateTime) {
+                            // Format: "YYYY:MM:DD HH:MM:SS" -> "YYYY-MM-DDTHH:MM:SS"
+                            const parts = dateTime.split(' ');
+                            const datePart = parts[0].replace(/:/g, '-');
+                            resolve(`${datePart}T${parts[1]}`);
+                          } else {
+                            // Fallback to file creation date if EXIF is missing
+                            const fallback = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
+                            resolve(fallback);
+                          }
+                        });
+                      });
+                    };
+
                     for (const file of files) {
+                      const takenAt = await extractTakenDate(file);
                       const fileExt = file.name.split('.').pop();
                       const fileName = `${session.user.id}/${Date.now()}_${Math.random()}.${fileExt}`;
+                      
                       const { data, error } = await supabase.storage.from('trip-photos').upload(fileName, file);
                       if (!error) {
                         const { data: { publicUrl } } = supabase.storage.from('trip-photos').getPublicUrl(fileName);
-                        const { error: dbError } = await supabase
-                          .from('photos')
-                          .insert([{
+                        
+                        // Try to insert with taken_at. If it fails (column missing), insert without it.
+                        const photoData = {
+                          trip_id: currentTrip.id,
+                          user_id: session.user.id,
+                          url: publicUrl,
+                          uploader_name: session.user.email.split('@')[0],
+                          taken_at: takenAt
+                        };
+
+                        const { error: dbError } = await supabase.from('photos').insert([photoData]);
+                        
+                        if (dbError) {
+                          console.warn('Taken_at insertion failed, retrying without it:', dbError);
+                          await supabase.from('photos').insert([{
                             trip_id: currentTrip.id,
                             user_id: session.user.id,
                             url: publicUrl,
                             uploader_name: session.user.email.split('@')[0]
                           }]);
-                        
-                        if (dbError) throw dbError;
+                        }
                       }
                       await new Promise(r => setTimeout(r, 200));
                     }
@@ -1568,41 +1643,137 @@ const App = () => {
               </div>
             </div>
 
-            <div className="gallery-grid">
-              {tripPhotos.map((photo, idx) => (
-                <div 
-                  key={photo.id} 
-                  className={`gallery-item ${selectedPhotos.includes(photo.id) ? 'selected' : ''}`}
-                  onClick={() => setLightboxIndex(idx)}
-                >
-                  <img 
-                    src={photo.url} 
-                    alt="Trip memory" 
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                      // Clear the photo URL from the state if it fails to load
-                      setTripPhotos(prev => prev.filter(p => p.id !== photo.id));
-                    }}
-                  />
-                  
-                  <div className="gallery-item-overlay">
-                    <div className="uploader-tag">@{photo.uploader_name || '익명'}</div>
-                    <div className="gallery-item-actions" onClick={e => e.stopPropagation()}>
-                      {!isReadOnly && (
-                        <button onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo); }} style={{ color: '#ed4956' }}>
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                      <button onClick={(e) => { e.stopPropagation(); handleDownloadPhoto(photo.url, `vibe-trip-${photo.id}.jpg`); }}>
-                        <Download size={16} />
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); togglePhotoSelection(photo.id); }}>
-                        {selectedPhotos.includes(photo.id) ? <CheckSquare size={16} color="#3897f0" /> : <Square size={16} />}
-                      </button>
+            <div className="gallery-header">
+              <div className="gallery-stats">
+                <h3>📜 Memory Lane</h3>
+                <span>총 {(tripPhotos || []).length}개의 추억</span>
+              </div>
+              <div className="gallery-actions">
+                {!isReadOnly && (
+                  <div className="trip-start-date-picker" title="여행 시작일 설정 (Day 자동 계산)">
+                    <Calendar size={16} />
+                    <input 
+                      type="date" 
+                      value={currentTrip?.start_date || ''} 
+                      onChange={(e) => handleUpdateTrip({ start_date: e.target.value })}
+                      className="start-date-input"
+                    />
+                  </div>
+                )}
+                {selectedPhotos.length > 0 && (
+                  <button className="batch-download-btn" onClick={handleBatchDownload}>
+                    <Download size={16} /> {selectedPhotos.length}개 다운로드
+                  </button>
+                )}
+                <label className="batch-upload-btn">
+                  <Upload size={16} /> 사진 업로드
+                  <input type="file" hidden multiple accept="image/*" onChange={async (e) => {
+                    const files = Array.from(e.target.files);
+                    if (files.length === 0) return;
+                    setIsLoading(true);
+                    
+                    const extractTakenDate = (file) => {
+                      return new Promise((resolve) => {
+                        EXIF.getData(file, function() {
+                          const dateTime = EXIF.getTag(this, "DateTimeOriginal");
+                          if (dateTime) {
+                            const parts = dateTime.split(' ');
+                            const datePart = parts[0].replace(/:/g, '-');
+                            resolve(`${datePart}T${parts[1]}`);
+                          } else {
+                            const fallback = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
+                            resolve(fallback);
+                          }
+                        });
+                      });
+                    };
+
+                    for (const file of files) {
+                      const takenAt = await extractTakenDate(file);
+                      const fileExt = file.name.split('.').pop();
+                      const fileName = `${session.user.id}/${Date.now()}_${Math.random()}.${fileExt}`;
+                      
+                      const { data, error } = await supabase.storage.from('trip-photos').upload(fileName, file);
+                      if (!error) {
+                        const { data: { publicUrl } } = supabase.storage.from('trip-photos').getPublicUrl(fileName);
+                        
+                        const photoData = {
+                          trip_id: currentTrip.id,
+                          user_id: session.user.id,
+                          url: publicUrl,
+                          uploader_name: session.user.email.split('@')[0],
+                          taken_at: takenAt
+                        };
+
+                        const { error: dbError } = await supabase.from('photos').insert([photoData]);
+                        
+                        if (dbError) {
+                          console.warn('Taken_at insertion failed, retrying without it:', dbError);
+                          await supabase.from('photos').insert([{
+                            trip_id: currentTrip.id,
+                            user_id: session.user.id,
+                            url: publicUrl,
+                            uploader_name: session.user.email.split('@')[0]
+                          }]);
+                        }
+                      }
+                      await new Promise(r => setTimeout(r, 200));
+                    }
+                    setIsLoading(false);
+                  }} />
+                </label>
+              </div>
+            </div>
+
+            <div className="gallery-content">
+              {groupedPhotos.map(([date, photos]) => {
+                const dayLabel = getDayNumber(date);
+                return (
+                  <div key={date} className="gallery-date-group">
+                    <div className="gallery-date-header">
+                      <span className="date-text">{date === '전체' ? '기타' : date}</span>
+                      {dayLabel && <span className="day-badge-mini">{dayLabel}</span>}
+                    </div>
+                    <div className="gallery-grid">
+                      {photos.map((photo) => {
+                        const globalIdx = tripPhotos.findIndex(p => p.id === photo.id);
+                        return (
+                          <div 
+                            key={photo.id} 
+                            className={`gallery-item ${selectedPhotos.includes(photo.id) ? 'selected' : ''}`}
+                            onClick={() => setLightboxIndex(globalIdx)}
+                          >
+                            <img 
+                              src={photo.url} 
+                              alt="Trip memory" 
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                                setTripPhotos(prev => prev.filter(p => p.id !== photo.id));
+                              }}
+                            />
+                            <div className="gallery-item-overlay">
+                              <div className="uploader-tag">@{photo.uploader_name || '익명'}</div>
+                              <div className="gallery-item-actions" onClick={e => e.stopPropagation()}>
+                                {!isReadOnly && (
+                                  <button onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo); }} style={{ color: '#ed4956' }}>
+                                    <Trash2 size={16} />
+                                  </button>
+                                )}
+                                <button onClick={(e) => { e.stopPropagation(); handleDownloadPhoto(photo.url, `vibe-trip-${photo.id}.jpg`); }}>
+                                  <Download size={16} />
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); togglePhotoSelection(photo.id); }}>
+                                  {selectedPhotos.includes(photo.id) ? <CheckSquare size={16} color="#3897f0" /> : <Square size={16} />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {tripPhotos.length === 0 && (
                 <div className="empty-gallery">
                   <ImageIcon size={48} color="#dbdbdb" />

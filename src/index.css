@@ -1304,4 +1304,55 @@ body {
 
 .drawer-opening-hours li {
   color: #444;
+
+/* Grouped Gallery Styles */
+.gallery-date-group {
+  margin-bottom: 30px;
+}
+
+.gallery-date-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 15px;
+  background: white;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid #efefef;
+  margin-bottom: 15px;
+}
+
+.date-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: #262626;
+}
+
+.day-badge-mini {
+  background: var(--insta-blue);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.trip-start-date-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f8f9fa;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #efefef;
+}
+
+.start-date-input {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: #262626;
+  outline: none;
+  cursor: pointer;
 }
