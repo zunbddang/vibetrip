@@ -1600,54 +1600,67 @@ const App = () => {
                     if (files.length === 0) return;
                     setIsLoading(true);
                     
-                    const extractTakenDate = (file) => {
-                      return new Promise((resolve) => {
-                        EXIF.getData(file, function() {
-                          const dateTime = EXIF.getTag(this, "DateTimeOriginal");
-                          if (dateTime) {
-                            const parts = dateTime.split(' ');
-                            const datePart = parts[0].replace(/:/g, '-');
-                            resolve(`${datePart}T${parts[1]}`);
-                          } else {
-                            const fallback = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
-                            resolve(fallback);
-                          }
+                    try {
+                      const extractTakenDate = (file) => {
+                        return new Promise((resolve) => {
+                          const timeoutId = setTimeout(() => {
+                            console.warn('EXIF timeout for:', file.name);
+                            resolve(file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString());
+                          }, 5000);
+
+                          EXIF.getData(file, function() {
+                            clearTimeout(timeoutId);
+                            const dateTime = EXIF.getTag(this, "DateTimeOriginal");
+                            if (dateTime) {
+                              const parts = dateTime.split(' ');
+                              const datePart = parts[0].replace(/:/g, '-');
+                              resolve(`${datePart}T${parts[1]}`);
+                            } else {
+                              const fallback = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
+                              resolve(fallback);
+                            }
+                          });
                         });
-                      });
-                    };
+                      };
 
-                    for (const file of files) {
-                      const takenAt = await extractTakenDate(file);
-                      const fileExt = file.name.split('.').pop();
-                      const fileName = `${session.user.id}/${Date.now()}_${Math.random()}.${fileExt}`;
-                      
-                      const { data, error } = await supabase.storage.from('trip-photos').upload(fileName, file);
-                      if (!error) {
-                        const { data: { publicUrl } } = supabase.storage.from('trip-photos').getPublicUrl(fileName);
+                      for (const file of files) {
+                        const takenAt = await extractTakenDate(file);
+                        const fileExt = file.name.split('.').pop();
+                        const fileName = `${session.user.id}/${Date.now()}_${Math.random()}.${fileExt}`;
                         
-                        const photoData = {
-                          trip_id: currentTrip.id,
-                          user_id: session.user.id,
-                          url: publicUrl,
-                          uploader_name: session.user.email.split('@')[0],
-                          taken_at: takenAt
-                        };
-
-                        const { error: dbError } = await supabase.from('photos').insert([photoData]);
-                        
-                        if (dbError) {
-                          console.warn('Taken_at insertion failed, retrying without it:', dbError);
-                          await supabase.from('photos').insert([{
+                        const { data, error } = await supabase.storage.from('trip-photos').upload(fileName, file);
+                        if (!error) {
+                          const { data: { publicUrl } } = supabase.storage.from('trip-photos').getPublicUrl(fileName);
+                          
+                          const photoData = {
                             trip_id: currentTrip.id,
                             user_id: session.user.id,
                             url: publicUrl,
-                            uploader_name: session.user.email.split('@')[0]
-                          }]);
+                            uploader_name: session.user.email.split('@')[0],
+                            taken_at: takenAt
+                          };
+
+                          const { error: dbError } = await supabase.from('photos').insert([photoData]);
+                          
+                          if (dbError) {
+                            console.warn('Taken_at insertion failed, retrying without it:', dbError);
+                            await supabase.from('photos').insert([{
+                              trip_id: currentTrip.id,
+                              user_id: session.user.id,
+                              url: publicUrl,
+                              uploader_name: session.user.email.split('@')[0]
+                            }]);
+                          }
                         }
+                        await new Promise(r => setTimeout(r, 200));
                       }
-                      await new Promise(r => setTimeout(r, 200));
+                    } catch (error) {
+                      console.error('Error during photo upload:', error);
+                      alert('사진 업로드 중 일부 오류가 발생했습니다.');
+                    } finally {
+                      setIsLoading(false);
+                      e.target.value = ''; // Reset input
                     }
-                    setIsLoading(false);
                   }} />
                 </label>
               </div>
