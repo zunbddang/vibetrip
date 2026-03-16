@@ -1568,80 +1568,6 @@ const App = () => {
 
         {activeTab === 'gallery' && (
           <div className="gallery-view-container fade-in">
-            <div className="gallery-header">
-              <div className="gallery-stats">
-                <h3>📜 Memory Lane</h3>
-                <span>총 {(tripSpots || []).filter(s => s.photoUrl).length}개의 추억</span>
-              </div>
-              <div className="gallery-actions">
-                {selectedPhotos.length > 0 && (
-                  <button className="batch-download-btn" onClick={handleBatchDownload}>
-                    <Download size={16} /> {selectedPhotos.length}개 다운로드
-                  </button>
-                )}
-                    <label className="batch-upload-btn">
-                  <Upload size={16} /> 사진 업로드
-                  <input type="file" hidden multiple accept="image/*" onChange={async (e) => {
-                    const files = Array.from(e.target.files);
-                    if (files.length === 0) return;
-                    setIsLoading(true);
-                    
-                    const extractTakenDate = (file) => {
-                      return new Promise((resolve) => {
-                        EXIF.getData(file, function() {
-                          const dateTime = EXIF.getTag(this, "DateTimeOriginal");
-                          if (dateTime) {
-                            // Format: "YYYY:MM:DD HH:MM:SS" -> "YYYY-MM-DDTHH:MM:SS"
-                            const parts = dateTime.split(' ');
-                            const datePart = parts[0].replace(/:/g, '-');
-                            resolve(`${datePart}T${parts[1]}`);
-                          } else {
-                            // Fallback to file creation date if EXIF is missing
-                            const fallback = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
-                            resolve(fallback);
-                          }
-                        });
-                      });
-                    };
-
-                    for (const file of files) {
-                      const takenAt = await extractTakenDate(file);
-                      const fileExt = file.name.split('.').pop();
-                      const fileName = `${session.user.id}/${Date.now()}_${Math.random()}.${fileExt}`;
-                      
-                      const { data, error } = await supabase.storage.from('trip-photos').upload(fileName, file);
-                      if (!error) {
-                        const { data: { publicUrl } } = supabase.storage.from('trip-photos').getPublicUrl(fileName);
-                        
-                        // Try to insert with taken_at. If it fails (column missing), insert without it.
-                        const photoData = {
-                          trip_id: currentTrip.id,
-                          user_id: session.user.id,
-                          url: publicUrl,
-                          uploader_name: session.user.email.split('@')[0],
-                          taken_at: takenAt
-                        };
-
-                        const { error: dbError } = await supabase.from('photos').insert([photoData]);
-                        
-                        if (dbError) {
-                          console.warn('Taken_at insertion failed, retrying without it:', dbError);
-                          await supabase.from('photos').insert([{
-                            trip_id: currentTrip.id,
-                            user_id: session.user.id,
-                            url: publicUrl,
-                            uploader_name: session.user.email.split('@')[0]
-                          }]);
-                        }
-                      }
-                      await new Promise(r => setTimeout(r, 200));
-                    }
-                    setIsLoading(false);
-                    alert(`${files.length}개의 사진이 업로드되었습니다.`);
-                  }} />
-                </label>
-              </div>
-            </div>
 
             <div className="gallery-header">
               <div className="gallery-stats">
@@ -1649,17 +1575,19 @@ const App = () => {
                 <span>총 {(tripPhotos || []).length}개의 추억</span>
               </div>
               <div className="gallery-actions">
-                {!isReadOnly && (
-                  <div className="trip-start-date-picker" title="여행 시작일 설정 (Day 자동 계산)">
-                    <Calendar size={16} />
+                <div className="trip-start-date-picker" title={isReadOnly ? "여행 시작일 (Day 자동 계산)" : "여행 시작일 설정"}>
+                  <Calendar size={16} />
+                  {isReadOnly ? (
+                    <span className="start-date-display">{currentTrip?.start_date || '미정'}</span>
+                  ) : (
                     <input 
                       type="date" 
                       value={currentTrip?.start_date || ''} 
                       onChange={(e) => handleUpdateTrip({ start_date: e.target.value })}
                       className="start-date-input"
                     />
-                  </div>
-                )}
+                  )}
+                </div>
                 {selectedPhotos.length > 0 && (
                   <button className="batch-download-btn" onClick={handleBatchDownload}>
                     <Download size={16} /> {selectedPhotos.length}개 다운로드

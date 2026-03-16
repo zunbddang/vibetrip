@@ -1304,6 +1304,7 @@ body {
 
 .drawer-opening-hours li {
   color: #444;
+}
 
 /* Grouped Gallery Styles */
 .gallery-date-group {
@@ -1355,4 +1356,10 @@ body {
   color: #262626;
   outline: none;
   cursor: pointer;
+}
+
+.start-date-display {
+  font-size: 12px;
+  color: #8e8e8e;
+  font-weight: 500;
 }
