@@ -1014,16 +1014,60 @@ const App = () => {
   const handleBatchDownload = async () => {
     if (selectedPhotos.length === 0) return;
     setIsLoading(true);
-    for (const photoId of selectedPhotos) {
-      const photo = tripPhotos.find(p => p.id === photoId);
-      if (photo?.url) {
-        await handleDownloadPhoto(photo.url, `trip-photo-${photoId}.jpg`);
+    
+    try {
+      const files = [];
+      for (const photoId of selectedPhotos) {
+        const photo = tripPhotos.find(p => p.id === photoId);
+        if (photo?.url) {
+          const response = await fetch(photo.url);
+          const blob = await response.blob();
+          const file = new File([blob], `trip-photo-${photoId}.jpg`, { type: blob.type });
+          files.push(file);
+        }
+      }
+
+      // If Web Share API supports file sharing (Batch)
+      if (navigator.canShare && navigator.canShare({ files })) {
+        try {
+          await navigator.share({
+            files,
+            title: '사진 묶음 저장',
+            text: `${files.length}개의 여행 사진을 저장합니다.`
+          });
+          setSelectedPhotos([]);
+          setIsLoading(false);
+          return;
+        } catch (shareErr) {
+          if (shareErr.name === 'AbortError') {
+             setIsLoading(false);
+             return; // User cancelled
+          }
+          console.warn('Batch share failed, falling back to individual download:', shareErr);
+        }
+      }
+
+      // Fallback for Desktop: Individual download loop
+      for (let i = 0; i < files.length; i++) {
+        const blobUrl = URL.createObjectURL(files[i]);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = files[i].name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
         await new Promise(r => setTimeout(r, 300));
       }
+      
+      alert(`${files.length}개의 사진 다운로드가 시작되었습니다.`);
+    } catch (err) {
+      console.error('Batch download failed:', err);
+      alert('일괄 다운로드 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+      setSelectedPhotos([]);
     }
-    setIsLoading(false);
-    setSelectedPhotos([]);
-    alert(`${selectedPhotos.length}개의 사진 다운로드가 시작되었습니다.`);
   };
 
   const handleBackToDashboard = () => {
