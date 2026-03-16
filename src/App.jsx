@@ -155,7 +155,6 @@ const App = () => {
   const [mapZoom, setMapZoom] = useState(12);
   const [userLocation, setUserLocation] = useState(null);
   const [lightboxIndex, setLightboxIndex] = useState(null);
-  const [heartPopId, setHeartPopId] = useState(null); // For double-tap like animation
   const mapSearchRef = useRef(null);
 
   // Handle URL Sharing
@@ -354,6 +353,36 @@ const App = () => {
     };
   }, [currentTrip]);
 
+  const uploadRemoteImage = async (url) => {
+    if (!url || !session?.user?.id) return null;
+    try {
+      // Proxy or direct fetch? Browser might block CORS if Google doesn't allow direct fetch with Blob.
+      // Usually Google Places photo URLs allow CORS from any origin for getUrl results.
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to fetch image');
+      const blob = await response.blob();
+      
+      const fileExt = 'jpg';
+      const fileName = `${session.user.id}/google_${Date.now()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('trip-photos')
+        .upload(filePath, blob);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('trip-photos')
+        .getPublicUrl(filePath);
+
+      return publicUrl;
+    } catch (err) {
+      console.warn('⚠️ Permanent upload failed, using temporary URL:', err);
+      return url; // Fallback to temp URL if upload fails
+    }
+  };
+
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || !session?.user?.id) return;
@@ -517,7 +546,22 @@ const App = () => {
       if (place?.geometry) {
         let photoUrl = null;
         if (place.photos && place.photos.length > 0) {
-          photoUrl = place.photos[0].getUrl({ maxWidth: 600, maxHeight: 600 });
+          try {
+            const tempUrl = place.photos[0].getUrl({ maxWidth: 600, maxHeight: 600 });
+            console.log('📸 Google Place Photo URL:', tempUrl);
+            
+            // Try to make it permanent immediately
+            uploadRemoteImage(tempUrl).then(permUrl => {
+               if (permUrl) {
+                  setSelectedSpot(prev => (prev && prev.id === tempId) ? { ...prev, photoUrl: permUrl } : prev);
+                  setSearchedPlace(prev => (prev && prev.id === tempId) ? { ...prev, photoUrl: permUrl } : prev);
+               }
+            });
+            
+            photoUrl = tempUrl; // Set temp first for immediate UI
+          } catch (err) {
+            console.error('❌ getUrl() failed:', err);
+          }
         }
         const tempId = 'temp-' + Date.now();
         const newPlace = {
@@ -606,7 +650,21 @@ const App = () => {
 
             let photoUrl = null;
             if (place.photos && place.photos.length > 0) {
-              photoUrl = place.photos[0].getUrl({ maxWidth: 600, maxHeight: 600 });
+              try {
+                const tempUrl = place.photos[0].getUrl({ maxWidth: 600, maxHeight: 600 });
+                console.log('📸 Google Place Photo URL (POI):', tempUrl);
+                
+                // Make it permanent
+                uploadRemoteImage(tempUrl).then(permUrl => {
+                  if (permUrl) {
+                    setSelectedSpot(prev => (prev && prev.id === tempId) ? { ...prev, photoUrl: permUrl } : prev);
+                  }
+                });
+
+                photoUrl = tempUrl;
+              } catch (err) {
+                console.error('❌ POI getUrl() failed:', err);
+              }
             }
 
             setSelectedSpot(prev => {
@@ -833,12 +891,6 @@ const App = () => {
     }
   };
 
-  const handleDoubleClick = (spotId) => {
-    handleToggleLike(spotId);
-    setHeartPopId(spotId);
-    setTimeout(() => setHeartPopId(null), 800);
-  };
-
   const handleAddRow = () => {
     if (isReadOnly) return;
     const newSpot = {
@@ -899,35 +951,41 @@ const App = () => {
   };
 
   const handleDownloadPhoto = async (url, filename) => {
-    const name = filename || 'vibe-trip-photo.jpg';
     try {
       const response = await fetch(url);
       const blob = await response.blob();
+      const file = new File([blob], filename || 'vibe-trip-photo.jpg', { type: blob.type });
 
-      // Mobile: Use Web Share API to open native share sheet (iOS "Save to Photos", Android "Gallery")
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: blob.type })] })) {
-        const file = new File([blob], name, { type: blob.type });
-        await navigator.share({
-          files: [file],
-          title: 'VibeTrip 여행 사진',
-          text: '소중한 추억을 저장해보세요 📸',
-        });
-        return;
+      // If Web Share API is available (iOS/Android)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: '사진 저장',
+            text: '여행 사진을 저장합니다.'
+          });
+          return; // Success
+        } catch (shareErr) {
+          if (shareErr.name !== 'AbortError') {
+            console.error('Share failed, falling back to traditional download:', shareErr);
+          } else {
+            return; // User cancelled
+          }
+        }
       }
 
-      // Desktop / fallback: standard download
+      // Fallback: Traditional download for Desktop
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = name;
+      link.download = filename || 'vibe-trip-photo.jpg';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
     } catch (err) {
-      if (err.name === 'AbortError') return; // User cancelled share sheet — not an error
       console.error('Download failed:', err);
-      // Last resort: open image in new tab so user can long-press save on mobile
+      // Last resort: Open in new tab
       window.open(url, '_blank');
     }
   };
@@ -983,23 +1041,33 @@ const App = () => {
         const newIndex = items.findIndex((i) => i.id === over.id);
         
         if (oldIndex !== -1 && newIndex !== -1) {
-          const newItems = arrayMove(items, oldIndex, newIndex);
+          const activeItem = { ...items[oldIndex] };
+          const overItem = items[newIndex];
+
+          // If moved to a different day group
+          if (activeItem.day !== overItem.day) {
+            activeItem.day = overItem.day;
+            activeItem.date = overItem.date;
+          }
+
+          // Move the item in the local array
+          const reorderedItems = [...items];
+          reorderedItems.splice(oldIndex, 1);
+          reorderedItems.splice(newIndex, 0, activeItem);
           
-          // Re-calibrate orderIndex for ALL items to be safe, 
-          // or at least those in the same group. 
-          // For simplicity and reliability, we sync the moved items.
-          const updatedItems = newItems.map((item, index) => ({
+          // Re-calibrate orderIndex for EVERYTHING to ensure consistency
+          const updatedItems = reorderedItems.map((item, index) => ({
             ...item,
             orderIndex: index
           }));
 
-          // Only sync those that actually changed or just the affected range.
-          // For now, syncing the ones that were moved is good.
-          // But to be 100% sure the DB matches the UI:
+          // Sync with database
           if (!isReadOnly) {
             updatedItems.forEach((item, idx) => {
-              // We only sync if the orderIndex actually changed or it's the active/over item
-              if (items[idx]?.id !== updatedItems[idx]?.id || items[idx]?.orderIndex !== idx) {
+              // Sync if the item itself changed (day/date) or its position changed
+              if (items[idx]?.id !== updatedItems[idx]?.id || 
+                  items[idx]?.day !== updatedItems[idx]?.day ||
+                  items[idx]?.orderIndex !== idx) {
                 syncSpot(updatedItems[idx]);
               }
             });
@@ -1113,15 +1181,23 @@ const App = () => {
                           <div className="post-avatar">{currentIndex}</div>
                           <div className="post-username">{spot.name}</div>
                         </div>
-                        <div 
-                          className="post-image" 
-                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f5', position: 'relative' }}
-                          onDoubleClick={() => handleDoubleClick(spot.id)}
-                        >
-                          {spot.photoUrl ? <img src={spot.photoUrl} alt={spot.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <MapPin size={48} color="#ccc" />}
-                          {heartPopId === spot.id && (
-                            <div className="heart-pop-overlay">
-                              <Heart size={70} fill="white" color="white" className="heart-pop-anim" />
+                        <div className="post-image">
+                          {(spot.photoUrl || spot.photo_url) ? (
+                            <img 
+                              src={spot.photoUrl || spot.photo_url} 
+                              alt={spot.name} 
+                              onError={(e) => {
+                                console.warn('📸 Feed image load failed, hiding...');
+                                e.target.style.display = 'none';
+                                e.target.parentElement.innerHTML = '<div class="empty-post-photo"><svg size="48" color="#ccc" ... /></div>';
+                                // Since we can't easily re-render the whole JSX here, 
+                                // it's better to just swap the display or use a state.
+                                // But for a one-off fix, hiding it is safest.
+                              }}
+                            />
+                          ) : (
+                            <div className="empty-post-photo">
+                              <MapPin size={48} color="#ccc" />
                             </div>
                           )}
                         </div>
@@ -1248,20 +1324,7 @@ const App = () => {
                 options={{ 
                   disableDefaultUI: true, 
                   zoomControl: true, 
-                  clickableIcons: true,
-                  styles: [
-                    { elementType: 'geometry', stylers: [{ color: '#f5f5f5' }] },
-                    { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-                    { elementType: 'labels.text.fill', stylers: [{ color: '#616161' }] },
-                    { elementType: 'labels.text.stroke', stylers: [{ color: '#f5f5f5' }] },
-                    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-                    { featureType: 'road.arterial', elementType: 'labels.text.fill', stylers: [{ color: '#757575' }] },
-                    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#dadada' }] },
-                    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9c9c9' }] },
-                    { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#9e9e9e' }] },
-                    { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-                    { featureType: 'transit', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-                  ]
+                  clickableIcons: true
                 }}
               >
                 {tripSpots.filter(s => selectedDay === null || s.day === selectedDay).map((spot, idx) => (
@@ -1323,7 +1386,15 @@ const App = () => {
                   <div className="drawer-photo-section">
                     {selectedSpot.photoUrl ? (
                       <div className="drawer-photo-container">
-                        <img src={selectedSpot.photoUrl} alt={selectedSpot.name} className="drawer-photo" />
+                        <img 
+                          src={selectedSpot.photoUrl} 
+                          alt={selectedSpot.name} 
+                          className="drawer-photo" 
+                          onError={(e) => {
+                            console.error('❌ Drawer photo failed to load (403/404).');
+                            e.target.style.display = 'none';
+                          }}
+                        />
                         {!isReadOnly && (
                           <label className="photo-edit-overlay">
                             <Camera size={20} />
@@ -1460,7 +1531,15 @@ const App = () => {
                   className={`gallery-item ${selectedPhotos.includes(photo.id) ? 'selected' : ''}`}
                   onClick={() => setLightboxIndex(idx)}
                 >
-                  <img src={photo.url} alt="Trip memory" />
+                  <img 
+                    src={photo.url} 
+                    alt="Trip memory" 
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      // Clear the photo URL from the state if it fails to load
+                      setTripPhotos(prev => prev.filter(p => p.id !== photo.id));
+                    }}
+                  />
                   
                   <div className="gallery-item-overlay">
                     <div className="uploader-tag">@{photo.uploader_name || '익명'}</div>
