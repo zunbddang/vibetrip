@@ -47,7 +47,7 @@ const getDayColor = (day) => {
   return DAY_COLORS[(day - 1) % DAY_COLORS.length];
 };
 
-const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
+const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => {
   const {
     attributes,
     listeners,
@@ -57,11 +57,31 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
     isDragging
   } = useSortable({ id: spot.id });
 
+  // Local states for smooth typing
+  const [localName, setLocalName] = React.useState(spot.name || '');
+  const [localDay, setLocalDay] = React.useState(spot.day || 1);
+  const [localDate, setLocalDate] = React.useState(spot.date || '');
+  const [localMemo, setLocalMemo] = React.useState(spot.memo || '');
+
+  // Sync with prop if it changes from outside
+  React.useEffect(() => {
+    setLocalName(spot.name || '');
+    setLocalDay(spot.day || 1);
+    setLocalDate(spot.date || '');
+    setLocalMemo(spot.memo || '');
+  }, [spot.name, spot.day, spot.date, spot.memo]);
+
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
     zIndex: isDragging ? 10 : 1
+  };
+
+  const handleBlur = (field, value) => {
+    if (spot[field] !== value) {
+      handleUpdateSpot(spot.id, field, value);
+    }
   };
 
   return (
@@ -82,8 +102,9 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
           <input
             type="text"
             className="row-input-name"
-            value={spot.name || ''}
-            onChange={(e) => handleUpdateSpot(spot.id, 'name', e.target.value)}
+            value={localName}
+            onChange={(e) => setLocalName(e.target.value)}
+            onBlur={(e) => handleBlur('name', e.target.value)}
             placeholder="장소명"
           />
           <button className="row-delete-btn" onClick={() => handleDeleteRow(spot.id)}>×</button>
@@ -94,29 +115,32 @@ const SortableRow = ({ spot, handleUpdateSpot, handleDeleteRow }) => {
             <input
               type="number"
               className="row-input-day"
-              value={spot.day || 1}
-              onChange={(e) => handleUpdateSpot(spot.id, 'day', parseInt(e.target.value) || 1)}
+              value={localDay}
+              onChange={(e) => setLocalDay(parseInt(e.target.value) || 1)}
+              onBlur={(e) => handleBlur('day', parseInt(e.target.value) || 1)}
             />
             <span className="row-day-label">일차</span>
             <input
               type="date"
               className="row-input-date"
-              value={spot.date || ''}
-              onChange={(e) => handleUpdateSpot(spot.id, 'date', e.target.value)}
+              value={localDate}
+              onChange={(e) => setLocalDate(e.target.value)}
+              onBlur={(e) => handleBlur('date', e.target.value)}
             />
           </div>
           <input
             type="text"
             className="row-input-memo"
-            value={spot.memo || ''}
-            onChange={(e) => handleUpdateSpot(spot.id, 'memo', e.target.value)}
+            value={localMemo}
+            onChange={(e) => setLocalMemo(e.target.value)}
+            onBlur={(e) => handleBlur('memo', e.target.value)}
             placeholder="상세 메모"
           />
         </div>
       </div>
     </div>
   );
-};
+});
 
 const GALLERY_DATA = [
   { id: 1, url: "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?auto=format&fit=crop&w=400&q=80", user: "Dad" },
@@ -139,6 +163,8 @@ const App = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedSpot, setSelectedSpot] = useState(null);
   const [selectedPhotos, setSelectedPhotos] = useState([]); // For batch download
+  const [uploadingFiles, setUploadingFiles] = useState([]); // For inline loading indicators
+  const [albumSortOrder, setAlbumSortOrder] = useState('date-asc'); // date-asc, date-desc, upload-desc
   const [searchedPlace, setSearchedPlace] = useState(null);
   const [map, setMap] = useState(null);
   const [formInput, setFormInput] = useState({
@@ -997,6 +1023,32 @@ const App = () => {
     );
   };
 
+  const handleSelectAll = () => {
+    setSelectedPhotos(tripPhotos.map(p => p.id));
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedPhotos([]);
+  };
+
+  const handleDeleteSelected = async () => {
+    if (isReadOnly || selectedPhotos.length === 0) return;
+    if (!confirm(`${selectedPhotos.length}개의 사진을 전체 삭제하시겠습니까?`)) return;
+
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.from('photos').delete().in('id', selectedPhotos);
+      if (error) throw error;
+      setTripPhotos(prev => prev.filter(p => !selectedPhotos.includes(p.id)));
+      setSelectedPhotos([]);
+    } catch (err) {
+      console.error('Batch delete failed:', err);
+      alert('일부 사진 삭제 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleDeletePhoto = async (photo) => {
     if (isReadOnly) return;
     if (!confirm('이 사진을 삭제하시겠습니까?')) return;
@@ -1017,16 +1069,17 @@ const App = () => {
     setIsLoading(true);
     
     try {
-      const files = [];
-      for (const photoId of selectedPhotos) {
+      const fetchBlob = async (photoId) => {
         const photo = tripPhotos.find(p => p.id === photoId);
         if (photo?.url) {
           const response = await fetch(photo.url);
           const blob = await response.blob();
-          const file = new File([blob], `trip-photo-${photoId}.jpg`, { type: blob.type });
-          files.push(file);
+          return new File([blob], `trip-photo-${photoId}.jpg`, { type: blob.type });
         }
-      }
+        return null;
+      };
+
+      const files = (await Promise.all(selectedPhotos.map(id => fetchBlob(id)))).filter(f => f !== null);
 
       // If Web Share API supports file sharing (Batch)
       if (navigator.canShare && navigator.canShare({ files })) {
@@ -1091,23 +1144,55 @@ const App = () => {
     }
   };
 
+  const computedStartDate = useMemo(() => {
+    if (currentTrip?.start_date) return currentTrip.start_date;
+    
+    const dates = [];
+    (tripSpots || []).forEach(s => s.date && dates.push(s.date));
+    (tripPhotos || []).forEach(p => p.taken_at && dates.push(p.taken_at.split('T')[0]));
+    
+    if (dates.length === 0) return null;
+    return dates.sort()[0];
+  }, [currentTrip?.start_date, tripSpots, tripPhotos]);
+
   const groupedPhotos = useMemo(() => {
+    let sortedPhotos = [...(tripPhotos || [])];
+    
+    if (albumSortOrder === 'upload-desc') {
+      // For upload-desc, we want a flat list or one big group. 
+      // Let's use '전체' as a group name for a flat-like experience.
+      return [['업로드 최신순', sortedPhotos.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))]];
+    }
+
     const groups = {};
-    (tripPhotos || []).forEach(photo => {
+    sortedPhotos.forEach(photo => {
       const date = photo.taken_at ? photo.taken_at.split('T')[0] : '전체';
       if (!groups[date]) groups[date] = [];
       groups[date].push(photo);
     });
-    return Object.entries(groups).sort((a, b) => {
+
+    // Sort photos within each group by full taken_at timestamp
+    Object.keys(groups).forEach(date => {
+      groups[date].sort((a, b) => {
+        const timeA = new Date(a.taken_at || 0).getTime();
+        const timeB = new Date(b.taken_at || 0).getTime();
+        return albumSortOrder === 'date-asc' ? timeA - timeB : timeB - timeA;
+      });
+    });
+
+    const entries = Object.entries(groups).sort((a, b) => {
       if (a[0] === '전체') return 1;
       if (b[0] === '전체') return -1;
-      return b[0].localeCompare(a[0]);
+      return albumSortOrder === 'date-asc' ? a[0].localeCompare(b[0]) : b[0].localeCompare(a[0]);
     });
-  }, [tripPhotos]);
+
+    return entries;
+  }, [tripPhotos, albumSortOrder]);
 
   const getDayNumber = (takenAt) => {
-    if (!currentTrip?.start_date || !takenAt) return null;
-    const start = new Date(currentTrip.start_date);
+    const startDate = computedStartDate;
+    if (!startDate || !takenAt) return null;
+    const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
     const taken = new Date(takenAt);
     taken.setHours(0, 0, 0, 0);
@@ -1116,7 +1201,7 @@ const App = () => {
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
     
     if (diffDays < 1) return "여행 전";
-    if (diffDays > 31) return "여행 한참 후"; // Limit Day X to a reasonable month for now
+    if (diffDays > 31) return `Day ${diffDays}`; // Allow any number of days
     return `Day ${diffDays}`;
   };
 
@@ -1575,18 +1660,17 @@ const App = () => {
                 <span>총 {(tripPhotos || []).length}개의 추억</span>
               </div>
               <div className="gallery-actions">
-                <div className="trip-start-date-picker" title={isReadOnly ? "여행 시작일 (Day 자동 계산)" : "여행 시작일 설정"}>
-                  <Calendar size={16} />
-                  {isReadOnly ? (
-                    <span className="start-date-display">{currentTrip?.start_date || '미정'}</span>
-                  ) : (
-                    <input 
-                      type="date" 
-                      value={currentTrip?.start_date || ''} 
-                      onChange={(e) => handleUpdateTrip({ start_date: e.target.value })}
-                      className="start-date-input"
-                    />
-                  )}
+                <div className="album-sort-control">
+                  <List size={14} color="#8e8e8e" />
+                  <select 
+                    className="album-sort-select" 
+                    value={albumSortOrder}
+                    onChange={(e) => setAlbumSortOrder(e.target.value)}
+                  >
+                    <option value="date-asc">날짜별 - 과거순</option>
+                    <option value="date-desc">날짜별 - 최신순</option>
+                    <option value="upload-desc">업로드 최신순</option>
+                  </select>
                 </div>
                 {selectedPhotos.length > 0 && (
                   <button className="batch-download-btn" onClick={handleBatchDownload}>
@@ -1598,7 +1682,14 @@ const App = () => {
                   <input type="file" hidden multiple accept="image/*" onChange={async (e) => {
                     const files = Array.from(e.target.files);
                     if (files.length === 0) return;
-                    setIsLoading(true);
+                    
+                    // Add to uploading queue for inline UI
+                    const newUploading = files.map(f => ({
+                      id: `uploading-${Date.now()}-${Math.random()}`,
+                      name: f.name,
+                      preview: URL.createObjectURL(f)
+                    }));
+                    setUploadingFiles(prev => [...prev, ...newUploading]);
                     
                     try {
                       const extractTakenDate = (file) => {
@@ -1623,7 +1714,7 @@ const App = () => {
                         });
                       };
 
-                      for (const file of files) {
+                      const uploadFile = async (file, uploadId) => {
                         const takenAt = await extractTakenDate(file);
                         const fileExt = file.name.split('.').pop();
                         const fileName = `${session.user.id}/${Date.now()}_${Math.random()}.${fileExt}`;
@@ -1652,13 +1743,15 @@ const App = () => {
                             }]);
                           }
                         }
+                        // Remove from uploading queue
+                        setUploadingFiles(prev => prev.filter(f => f.id !== newUploading[i].id));
                         await new Promise(r => setTimeout(r, 200));
                       }
                     } catch (error) {
                       console.error('Error during photo upload:', error);
                       alert('사진 업로드 중 일부 오류가 발생했습니다.');
                     } finally {
-                      setIsLoading(false);
+                      setUploadingFiles([]);
                       e.target.value = ''; // Reset input
                     }
                   }} />
@@ -1667,15 +1760,62 @@ const App = () => {
             </div>
 
             <div className="gallery-content">
+              {groupedPhotos.length > 0 && albumSortOrder !== 'upload-desc' && (
+                <div className="timeline-strip">
+                  {groupedPhotos.map(([date, _]) => {
+                    const dayLabel = getDayNumber(date);
+                    return (
+                      <button 
+                        key={date} 
+                        className="timeline-item"
+                        onClick={() => {
+                          const element = document.getElementById(`gallery-group-${date}`);
+                          if (element) {
+                            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          }
+                        }}
+                      >
+                        {dayLabel ? dayLabel : (date === '전체' ? '기타' : date)}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {tripPhotos.length > 0 && (
+                <div className="gallery-selection-bar">
+                  <button className="selection-control-btn" onClick={handleSelectAll}>전체 선택</button>
+                  <button className="selection-control-btn" onClick={handleDeselectAll}>선택 해제</button>
+                  {selectedPhotos.length > 0 && !isReadOnly && (
+                    <button className="delete-action-btn" onClick={handleDeleteSelected}>
+                      <Trash2 size={14} /> {selectedPhotos.length}개 삭제
+                    </button>
+                  )}
+                </div>
+              )}
+
               {groupedPhotos.map(([date, photos]) => {
                 const dayLabel = getDayNumber(date);
                 return (
-                  <div key={date} className="gallery-date-group">
+                  <div key={date} id={`gallery-group-${date}`} className="gallery-date-group">
                     <div className="gallery-date-header">
-                      <span className="date-text">{date === '전체' ? '기타' : date}</span>
-                      {dayLabel && <span className="day-badge-mini">{dayLabel}</span>}
+                      <div className="date-info">
+                        <span className="date-label">{date === '전체' ? '기타 날짜' : date}</span>
+                        {dayLabel && <span className="day-badge-small">{dayLabel}</span>}
+                      </div>
                     </div>
                     <div className="gallery-grid">
+                      {/* Uploading Placeholders */}
+                      {date === '전체' && uploadingFiles.length > 0 && uploadingFiles.map(file => (
+                        <div key={file.id} className="gallery-item uploading">
+                          <img src={file.preview} alt="uploading" style={{ opacity: 0.3 }} />
+                          <div className="upload-spinner-overlay">
+                            <div className="mini-spinner"></div>
+                            <span className="upload-text">업로드 중...</span>
+                          </div>
+                        </div>
+                      ))}
+                      
                       {photos.map((photo) => {
                         const globalIdx = tripPhotos.findIndex(p => p.id === photo.id);
                         return (
@@ -1704,7 +1844,7 @@ const App = () => {
                                   <Download size={16} />
                                 </button>
                                 <button onClick={(e) => { e.stopPropagation(); togglePhotoSelection(photo.id); }}>
-                                  {selectedPhotos.includes(photo.id) ? <CheckSquare size={16} color="#3897f0" /> : <Square size={16} />}
+                                  {selectedPhotos.includes(photo.id) ? <CheckSquare size={16} color="#3897f0" fill="#3897f033" /> : <Square size={16} />}
                                 </button>
                               </div>
                             </div>
@@ -1715,11 +1855,14 @@ const App = () => {
                   </div>
                 );
               })}
-              {tripPhotos.length === 0 && (
+              
+              {tripPhotos.length === 0 && uploadingFiles.length === 0 && (
                 <div className="empty-gallery">
-                  <ImageIcon size={48} color="#dbdbdb" />
-                  <p>아직 피드 전용 사진이 없습니다.</p>
-                  <span>아래 버튼을 통해 소중한 추억을 공유해 보세요!</span>
+                  <div className="empty-icon-circle">
+                    <ImageIcon size={40} color="#dbdbdb" />
+                  </div>
+                  <h4>아직 사진이 없습니다</h4>
+                  <p>소중한 여행의 기억을 사진으로 남겨보세요!</p>
                 </div>
               )}
             </div>
