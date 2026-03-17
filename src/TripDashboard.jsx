@@ -17,6 +17,7 @@ const TripDashboard = ({ session, onSelectTrip }) => {
     const [addingShared, setAddingShared] = useState(false);
     const [shareTrip, setShareTrip] = useState(null); // Trip being shared
     const [shareStatus, setShareStatus] = useState(null); // stores tripId of currently copied trip
+    const [participants, setParticipants] = useState({}); // tripId -> Set of names
 
     useEffect(() => {
         fetchTrips();
@@ -48,7 +49,39 @@ const TripDashboard = ({ session, onSelectTrip }) => {
                 if (!sError) sharedData = sData || [];
             }
 
-            setTrips([...(ownData || []), ...sharedData]);
+            const allTrips = [...(ownData || []), ...sharedData];
+            setTrips(allTrips);
+
+            // Fetch participants (uploaders + members) for all these trips
+            const tripIds = allTrips.map(t => t.id);
+            if (tripIds.length > 0) {
+                const [spotsRes, photosRes, membersRes] = await Promise.all([
+                    supabase.from('spots').select('trip_id, uploader_name').in('trip_id', tripIds),
+                    supabase.from('photos').select('trip_id, uploader_name').in('trip_id', tripIds),
+                    supabase.from('trip_members').select('trip_id, user_name').in('trip_id', tripIds)
+                ]);
+
+                const participantMap = {};
+                const processData = (data, nameKey) => {
+                    data?.forEach(item => {
+                        const name = item[nameKey];
+                        if (!name || name === '익명') return;
+                        if (!participantMap[item.trip_id]) participantMap[item.trip_id] = new Set();
+                        participantMap[item.trip_id].add(name);
+                    });
+                };
+
+                processData(spotsRes.data, 'uploader_name');
+                processData(photosRes.data, 'uploader_name');
+                processData(membersRes.data, 'user_name');
+                
+                // Convert Sets to Arrays for state
+                const finalMap = {};
+                Object.keys(participantMap).forEach(tid => {
+                    finalMap[tid] = [...participantMap[tid]];
+                });
+                setParticipants(finalMap);
+            }
         } catch (err) {
             console.error('Error fetching trips:', err);
         } finally {
@@ -96,6 +129,16 @@ const TripDashboard = ({ session, onSelectTrip }) => {
             const storedIds = JSON.parse(localStorage.getItem(sharedKeys) || '[]');
             if (!storedIds.includes(tripId)) {
                 localStorage.setItem(sharedKeys, JSON.stringify([...storedIds, tripId]));
+            }
+
+            // Also record in database trip_members if possible
+            try {
+                const userName = session.user.email.split('@')[0];
+                await supabase
+                    .from('trip_members')
+                    .upsert([{ trip_id: tripId, user_id: session.user.id, user_name: userName }], { onConflict: 'trip_id,user_id' });
+            } catch (e) {
+                console.warn('Failed to record trip_member (table might not exist):', e);
             }
 
             // Refresh list
@@ -315,6 +358,27 @@ const TripDashboard = ({ session, onSelectTrip }) => {
                                             </span>
                                         )}
                                     </div>
+                                    
+                                    {/* Participant Avatars */}
+                                    {participants[trip.id] && participants[trip.id].length > 0 && (
+                                        <div className="trip-participants-stack">
+                                            {participants[trip.id].slice(0, 4).map((name, i) => (
+                                                <div 
+                                                    key={name} 
+                                                    className="participant-avatar" 
+                                                    title={name}
+                                                    style={{ zIndex: 10 - i, backgroundColor: `hsl(${(name.length * 40) % 360}, 70%, 65%)` }}
+                                                >
+                                                  {name.charAt(0).toUpperCase()}
+                                                </div>
+                                            ))}
+                                            {participants[trip.id].length > 4 && (
+                                                <div className="participant-more">
+                                                    +{participants[trip.id].length - 4}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="trip-card-actions">
                                     <button className="select-trip-btn" onClick={() => onSelectTrip(trip)}>

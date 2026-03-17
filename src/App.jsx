@@ -166,6 +166,7 @@ const App = () => {
   const [uploadingFiles, setUploadingFiles] = useState([]); // For inline loading indicators
   const [albumSortOrder, setAlbumSortOrder] = useState('date-asc'); // date-asc, date-desc, upload-desc
   const [searchedPlace, setSearchedPlace] = useState(null);
+  const [tripMembers, setTripMembers] = useState([]); // Members tracked via trip_members table
   const [map, setMap] = useState(null);
   const [formInput, setFormInput] = useState({
     day: 1,
@@ -203,13 +204,23 @@ const App = () => {
           // Save to shared trips in localStorage if logged in and not owner
           const currentSession = await supabase.auth.getSession();
           const userId = currentSession.data.session?.user?.id;
-          if (userId && data.owner_id !== userId) {
-            const sharedKeys = 'vibe-trip-shared-ids';
-            const storedIds = JSON.parse(localStorage.getItem(sharedKeys) || '[]');
-            if (!storedIds.includes(id)) {
-              localStorage.setItem(sharedKeys, JSON.stringify([...storedIds, id]));
+            if (userId && data.owner_id !== userId) {
+              const sharedKeys = 'vibe-trip-shared-ids';
+              const storedIds = JSON.parse(localStorage.getItem(sharedKeys) || '[]');
+              if (!storedIds.includes(id)) {
+                localStorage.setItem(sharedKeys, JSON.stringify([...storedIds, id]));
+              }
+
+              // Also record in database trip_members if possible
+              try {
+                const userName = currentSession.data.session.user.email.split('@')[0];
+                await supabase
+                  .from('trip_members')
+                  .upsert([{ trip_id: id, user_id: userId, user_name: userName }], { onConflict: 'trip_id,user_id' });
+              } catch (e) {
+                console.warn('Failed to record trip_member (table might not exist):', e);
+              }
             }
-          }
         } catch (err) {
           console.error('Error fetching shared trip:', err);
         } finally {
@@ -236,22 +247,25 @@ const App = () => {
     if (!currentTrip) {
       setTripSpots([]);
       setTripPhotos([]);
+      setTripMembers([]);
       return;
     }
     const fetchSpots = async () => {
       setIsLoading(true);
-      const { data: spots, error: spotsError } = await supabase
-        .from('spots')
-        .select('*')
-        .eq('trip_id', currentTrip.id)
-        .order('day', { ascending: true })
-        .order('order_index', { ascending: true })
-        .order('id', { ascending: true });
+      
+      // Fetch members, spots, and photos
+      const [spotsRes, photosRes, membersRes] = await Promise.all([
+        supabase.from('spots').select('*').eq('trip_id', currentTrip.id).order('day', { ascending: true }).order('order_index', { ascending: true }),
+        supabase.from('photos').select('*').eq('trip_id', currentTrip.id).order('created_at', { ascending: false }),
+        supabase.from('trip_members').select('user_name').eq('trip_id', currentTrip.id)
+      ]);
 
-      if (spotsError) {
-        console.error('Error fetching spots:', spotsError);
+      if (membersRes.data) setTripMembers(membersRes.data.map(m => m.user_name));
+
+      if (spotsRes.error) {
+        console.error('Error fetching spots:', spotsRes.error);
       } else {
-        const processedSpots = (spots || []).map(s => ({
+        const processedSpots = (spotsRes.data || []).map(s => ({
           ...s,
           photoUrl: s.photo_url,
           isLiked: s.is_liked || false,
@@ -267,16 +281,10 @@ const App = () => {
         }
       }
 
-      const { data: photos, error: photosError } = await supabase
-        .from('photos')
-        .select('*')
-        .eq('trip_id', currentTrip.id)
-        .order('created_at', { ascending: false });
-
-      if (photosError) {
-        console.error('Error fetching photos:', photosError);
+      if (photosRes.error) {
+        console.error('Error fetching photos:', photosRes.error);
       } else {
-        setTripPhotos(photos || []);
+        setTripPhotos(photosRes.data || []);
       }
       setIsLoading(false);
     };
@@ -968,8 +976,9 @@ const App = () => {
     }
     tripSpots.forEach(s => s.uploaderName && names.add(s.uploaderName));
     tripPhotos.forEach(p => p.uploader_name && names.add(p.uploader_name));
+    tripMembers.forEach(m => names.add(m));
     return [...names].filter(n => n && n !== '익명');
-  }, [tripSpots, tripPhotos, currentTrip]);
+  }, [tripSpots, tripPhotos, tripMembers, currentTrip]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
