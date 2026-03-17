@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from './supabase';
 import { Plus, Globe, Lock, Trash2, ArrowRight, Share2, Search } from 'lucide-react';
 import './Dashboard.css';
 import ShareModal from './ShareModal';
+import UserAvatar from './UserAvatar';
 
-const TripDashboard = ({ session, onSelectTrip }) => {
+const TripDashboard = ({ session, onSelectTrip, onLogout, onUpdateProfile }) => {
     const [trips, setTrips] = useState([]);
     const [newTripTitle, setNewTripTitle] = useState('');
     const [sharedLink, setSharedLink] = useState('');
@@ -133,7 +134,7 @@ const TripDashboard = ({ session, onSelectTrip }) => {
 
             // Also record in database trip_members if possible
             try {
-                const userName = session.user.email.split('@')[0];
+                const userName = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
                 await supabase
                     .from('trip_members')
                     .upsert([{ trip_id: tripId, user_id: session.user.id, user_name: userName }], { onConflict: 'trip_id,user_id' });
@@ -166,7 +167,19 @@ const TripDashboard = ({ session, onSelectTrip }) => {
 
             if (error) throw error;
             if (data && data.length > 0) {
-                setTrips([data[0], ...trips]);
+                const newTrip = data[0];
+                
+                // Also record owner as a member
+                try {
+                    const userName = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
+                    await supabase
+                        .from('trip_members')
+                        .upsert([{ trip_id: newTrip.id, user_id: session.user.id, user_name: userName }], { onConflict: 'trip_id,user_id' });
+                } catch (e) {
+                    console.warn('Failed to record owner as member:', e);
+                }
+
+                setTrips([newTrip, ...trips]);
                 setNewTripTitle('');
             }
         } catch (err) {
@@ -253,10 +266,10 @@ const TripDashboard = ({ session, onSelectTrip }) => {
 
     return (
         <div className="dashboard-container fade-in">
-            <header className="dashboard-header">
-                <h1>나의 여행 목록</h1>
-                <p>떠나고 싶은 여행을 만들고 공유해보세요</p>
-            </header>
+            <div className="dashboard-welcome">
+                <h1 className="dashboard-title">나의 여행 목록</h1>
+                <p className="dashboard-subtitle">떠나고 싶은 여행을 만들고 공유해보세요</p>
+            </div>
 
             <div className="dashboard-inputs">
                 <div className="input-group">

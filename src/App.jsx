@@ -31,6 +31,7 @@ import { supabase } from './supabase';
 import Auth from './Auth';
 import TripDashboard from './TripDashboard';
 import ShareModal from './ShareModal';
+import UserAvatar from './UserAvatar';
 
 const DAY_COLORS = [
   '#ed4956', // Day 1: Red
@@ -213,7 +214,7 @@ const App = () => {
 
               // Also record in database trip_members if possible
               try {
-                const userName = currentSession.data.session.user.email.split('@')[0];
+                const userName = currentSession.data.session.user.user_metadata?.full_name || currentSession.data.session.user.email.split('@')[0];
                 await supabase
                   .from('trip_members')
                   .upsert([{ trip_id: id, user_id: userId, user_name: userName }], { onConflict: 'trip_id,user_id' });
@@ -388,6 +389,34 @@ const App = () => {
     };
   }, [currentTrip]);
 
+  // Persistent Member Tracking: Record user whenever they access a trip
+  useEffect(() => {
+    if (session?.user && currentTrip?.id) {
+      const recordMembership = async () => {
+        try {
+          const userName = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
+          await supabase
+            .from('trip_members')
+            .upsert([
+              { 
+                trip_id: currentTrip.id, 
+                user_id: session.user.id, 
+                user_name: userName 
+              }
+            ], { onConflict: 'trip_id,user_id' });
+            
+          // If we just joined, we might need to refresh members list
+          if (!tripMembers.includes(userName)) {
+            setTripMembers(prev => Array.from(new Set([...prev, userName])));
+          }
+        } catch (e) {
+          console.warn('Silent failure recording membership:', e);
+        }
+      };
+      recordMembership();
+    }
+  }, [session?.user?.id, session?.user?.user_metadata?.full_name, currentTrip?.id]);
+
   const uploadRemoteImage = async (url) => {
     if (!url || !session?.user?.id) return null;
     try {
@@ -438,7 +467,7 @@ const App = () => {
         .from('trip-photos')
         .getPublicUrl(filePath);
 
-      const uploaderName = session.user.email.split('@')[0];
+      const uploaderName = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
       setSelectedSpot(prev => ({ ...prev, photoUrl: publicUrl, uploaderName }));
       // If it's an existing spot, sync immediately
       if (selectedSpot && !String(selectedSpot.id).startsWith('temp-')) {
@@ -980,6 +1009,30 @@ const App = () => {
     return [...names].filter(n => n && n !== '익명');
   }, [tripSpots, tripPhotos, tripMembers, currentTrip]);
 
+  const handleUpdateNickname = async () => {
+    const currentName = session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email.split('@')[0];
+    const newName = prompt('새로운 닉네임을 입력해주세요:', currentName);
+    
+    if (newName && newName !== currentName) {
+      try {
+        setIsLoading(true);
+        const { error } = await supabase.auth.updateUser({
+          data: { full_name: newName }
+        });
+        if (error) throw error;
+        
+        // Refresh session to reflect changes
+        const { data: { session: newSession } } = await supabase.auth.getSession();
+        setSession(newSession);
+        alert('닉네임이 성공적으로 변경되었습니다!');
+      } catch (err) {
+        alert('닉네임 변경 실패: ' + err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setSession(null);
@@ -1272,11 +1325,21 @@ const App = () => {
   if (session && !currentTrip) {
     return (
       <div className="app-container">
-        <header className="app-header">
-          <h1 className="logo">VibeTrip ✨</h1>
-          <button className="logout-btn" onClick={handleLogout}>로그아웃</button>
+        <header className="app-header dashboard-header-minimal">
+          <div className="header-right" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span className="user-nickname-tag">
+              {session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email.split('@')[0]}님
+            </span>
+            <UserAvatar user={session.user} onClick={handleUpdateNickname} />
+            <button className="logout-btn-minimal" onClick={handleLogout}>로그아웃</button>
+          </div>
         </header>
-        <TripDashboard session={session} onSelectTrip={(trip) => setCurrentTrip(trip)} />
+        <TripDashboard 
+          session={session} 
+          onSelectTrip={(trip) => setCurrentTrip(trip)} 
+          onLogout={handleLogout}
+          onUpdateProfile={handleUpdateNickname}
+        />
         <ShareModal
           isOpen={isShareModalOpen}
           onClose={() => setIsShareModalOpen(false)}
@@ -1305,7 +1368,10 @@ const App = () => {
             </div>
           )}
           {session ? (
-            <button className="logout-btn" onClick={handleLogout} style={{ marginRight: '10px', fontSize: '13px', border: 'none', background: 'none', color: '#8e8e8e', cursor: 'pointer' }}>로그아웃</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+               <UserAvatar user={session.user} onClick={handleUpdateNickname} />
+               <button onClick={handleLogout} style={{ border: 'none', background: 'none', color: '#8e8e8e', fontSize: '12px', cursor: 'pointer' }}>로그아웃</button>
+            </div>
           ) : (
             <button className="login-btn" onClick={handleBackToDashboard} style={{ marginRight: '10px', fontSize: '13px', border: 'none', background: '#0095f6', color: 'white', padding: '5px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>로그인</button>
           )}
