@@ -23,7 +23,42 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import EXIF from 'exif-js';
-import { Home, Map as MapIcon, Image as ImageIcon, SquarePlus, Heart, MessageCircle, Bookmark, Download, MapPin, Share2, TableProperties, LocateFixed, Search, GripVertical, List, Camera, Upload, Square, CheckSquare, Trash2, Star, Calendar } from 'lucide-react';
+import { 
+  Home, 
+  Map as MapIcon, 
+  Image as ImageIcon, 
+  SquarePlus, 
+  Heart, 
+  MessageCircle, 
+  Bookmark, 
+  Download, 
+  MapPin, 
+  Share2, 
+  TableProperties, 
+  LocateFixed, 
+  Search, 
+  GripVertical, 
+  ChevronLeft, 
+  Camera, 
+  Upload, 
+  Square, 
+  CheckSquare, 
+  Trash2, 
+  Star, 
+  Calendar,
+  X,
+  Check,
+  Clock,
+  Phone,
+  Settings,
+  MoreVertical,
+  ChevronRight,
+  Maximize2,
+  Trash,
+  Users,
+  Navigation,
+  List
+} from 'lucide-react';
 import './index.css';
 import './Drawer.css';
 import './Dashboard.css';
@@ -1354,7 +1389,7 @@ const App = () => {
     <div className="app-container">
       <header className="app-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          {session && <button className="back-btn" onClick={handleBackToDashboard}><List size={20} /></button>}
+          {session && <button className="back-btn" onClick={handleBackToDashboard} title="대시보드로 돌아가기"><ChevronLeft size={24} /></button>}
           <h1 className="logo" onClick={() => setActiveTab('feed')}>{currentTrip?.title || 'VibeTrip ✨'}</h1>
         </div>
         <div className="header-right">

@@ -2,6 +2,24 @@
     max-width: 1000px;
     margin: 0 auto;
     padding: 60px 20px;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+@media (max-width: 768px) {
+    .dashboard-container {
+        padding: 30px 16px;
+    }
+    
+    .dashboard-welcome {
+        margin-bottom: 30px;
+    }
+    
+    .dashboard-title {
+        font-size: 32px;
+    }
 }
 
 
