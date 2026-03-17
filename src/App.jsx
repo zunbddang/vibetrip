@@ -1189,19 +1189,25 @@ const App = () => {
     return entries;
   }, [tripPhotos, albumSortOrder]);
 
-  const getDayNumber = (takenAt) => {
+  const getDayNumber = (dateStr) => {
     const startDate = computedStartDate;
-    if (!startDate || !takenAt) return null;
+    if (!startDate || !dateStr) return null;
+    
+    // Check if it's a valid date string (YYYY-MM-DD)
+    const isDateStr = /^\d{4}-\d{2}-\d{2}/.test(dateStr);
+    if (!isDateStr) return null;
+
     const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
-    const taken = new Date(takenAt);
+    const taken = new Date(dateStr);
     taken.setHours(0, 0, 0, 0);
     
     const diffTime = taken - start;
+    if (isNaN(diffTime)) return null;
+    
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
     
     if (diffDays < 1) return "여행 전";
-    if (diffDays > 31) return `Day ${diffDays}`; // Allow any number of days
     return `Day ${diffDays}`;
   };
 
@@ -1695,19 +1701,33 @@ const App = () => {
                       return new Promise((resolve) => {
                         const timeoutId = setTimeout(() => {
                           console.warn('EXIF timeout:', file.name);
-                          resolve(file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString());
+                          // Fallback to file modification date or current time
+                          const fallbackDate = file.lastModified ? new Date(file.lastModified) : new Date();
+                          resolve(fallbackDate.toISOString());
                         }, 5000);
 
                         EXIF.getData(file, function() {
                           clearTimeout(timeoutId);
-                          const dateTime = EXIF.getTag(this, "DateTimeOriginal");
-                          if (dateTime) {
-                            const parts = dateTime.split(' ');
-                            const datePart = parts[0].replace(/:/g, '-');
-                            resolve(`${datePart}T${parts[1]}`);
-                          } else {
-                            resolve(file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString());
+                          try {
+                            const dateTime = EXIF.getTag(this, "DateTimeOriginal") || EXIF.getTag(this, "DateTime");
+                            if (dateTime && typeof dateTime === 'string') {
+                              // Standard EXIF format is "YYYY:MM:DD HH:MM:SS"
+                              // Some devices might use slightly different separators
+                              const [datePart, timePart] = dateTime.split(/[\sT]/);
+                              if (datePart && timePart) {
+                                const normalizedDate = datePart.replace(/:/g, '-');
+                                // Ensure it's YYYY-MM-DDTHH:MM:SS
+                                resolve(`${normalizedDate}T${timePart}`);
+                                return;
+                              }
+                            }
+                          } catch (e) {
+                            console.error('EXIF parse error:', e);
                           }
+                          
+                          // Final fallback
+                          const finalFallback = file.lastModified ? new Date(file.lastModified) : new Date();
+                          resolve(finalFallback.toISOString());
                         });
                       });
                     };
