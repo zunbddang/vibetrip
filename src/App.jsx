@@ -1683,7 +1683,7 @@ const App = () => {
                     const files = Array.from(e.target.files);
                     if (files.length === 0) return;
                     
-                    // Add to uploading queue for inline UI
+                    // 1. Create unique uploading slots for each file
                     const newUploading = files.map(f => ({
                       id: `uploading-${Date.now()}-${Math.random()}`,
                       name: f.name,
@@ -1691,68 +1691,78 @@ const App = () => {
                     }));
                     setUploadingFiles(prev => [...prev, ...newUploading]);
                     
-                    try {
-                      const extractTakenDate = (file) => {
-                        return new Promise((resolve) => {
-                          const timeoutId = setTimeout(() => {
-                            console.warn('EXIF timeout for:', file.name);
+                    const extractTakenDate = (file) => {
+                      return new Promise((resolve) => {
+                        const timeoutId = setTimeout(() => {
+                          console.warn('EXIF timeout:', file.name);
+                          resolve(file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString());
+                        }, 5000);
+
+                        EXIF.getData(file, function() {
+                          clearTimeout(timeoutId);
+                          const dateTime = EXIF.getTag(this, "DateTimeOriginal");
+                          if (dateTime) {
+                            const parts = dateTime.split(' ');
+                            const datePart = parts[0].replace(/:/g, '-');
+                            resolve(`${datePart}T${parts[1]}`);
+                          } else {
                             resolve(file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString());
-                          }, 5000);
-
-                          EXIF.getData(file, function() {
-                            clearTimeout(timeoutId);
-                            const dateTime = EXIF.getTag(this, "DateTimeOriginal");
-                            if (dateTime) {
-                              const parts = dateTime.split(' ');
-                              const datePart = parts[0].replace(/:/g, '-');
-                              resolve(`${datePart}T${parts[1]}`);
-                            } else {
-                              const fallback = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
-                              resolve(fallback);
-                            }
-                          });
+                          }
                         });
-                      };
+                      });
+                    };
 
-                      const uploadFile = async (file, uploadId) => {
+                    const uploadFile = async (file, uploadId) => {
+                      try {
                         const takenAt = await extractTakenDate(file);
                         const fileExt = file.name.split('.').pop();
                         const fileName = `${session.user.id}/${Date.now()}_${Math.random()}.${fileExt}`;
                         
-                        const { data, error } = await supabase.storage.from('trip-photos').upload(fileName, file);
-                        if (!error) {
-                          const { data: { publicUrl } } = supabase.storage.from('trip-photos').getPublicUrl(fileName);
-                          
-                          const photoData = {
+                        const { data, error: storageError } = await supabase.storage.from('trip-photos').upload(fileName, file);
+                        if (storageError) throw storageError;
+
+                        const { data: { publicUrl } } = supabase.storage.from('trip-photos').getPublicUrl(fileName);
+                        
+                        const photoData = {
+                          trip_id: currentTrip.id,
+                          user_id: session.user.id,
+                          url: publicUrl,
+                          uploader_name: session.user.email.split('@')[0],
+                          taken_at: takenAt
+                        };
+                        
+                        // Insert into 'photos' table
+                        const { data: newPhoto, error: dbError } = await supabase.from('photos').insert([photoData]).select().single();
+                        
+                        if (dbError) {
+                          console.warn('DB Error with metadata, retrying minimal:', dbError);
+                          const { data: retryPhoto, error: retryError } = await supabase.from('photos').insert([{
                             trip_id: currentTrip.id,
                             user_id: session.user.id,
                             url: publicUrl,
-                            uploader_name: session.user.email.split('@')[0],
-                            taken_at: takenAt
-                          };
-
-                          const { error: dbError } = await supabase.from('photos').insert([photoData]);
+                            uploader_name: session.user.email.split('@')[0]
+                          }]).select().single();
                           
-                          if (dbError) {
-                            console.warn('Taken_at insertion failed, retrying without it:', dbError);
-                            await supabase.from('photos').insert([{
-                              trip_id: currentTrip.id,
-                              user_id: session.user.id,
-                              url: publicUrl,
-                              uploader_name: session.user.email.split('@')[0]
-                            }]);
-                          }
+                          if (retryError) throw retryError;
+                          if (retryPhoto) setTripPhotos(prev => [...prev, retryPhoto]);
+                        } else if (newPhoto) {
+                          setTripPhotos(prev => [...prev, newPhoto]);
                         }
-                        // Remove from uploading queue
-                        setUploadingFiles(prev => prev.filter(f => f.id !== newUploading[i].id));
-                        await new Promise(r => setTimeout(r, 200));
+                      } catch (err) {
+                        console.error(`Upload error for ${file.name}:`, err);
+                      } finally {
+                        setUploadingFiles(prev => prev.filter(f => f.id !== uploadId));
                       }
-                    } catch (error) {
-                      console.error('Error during photo upload:', error);
-                      alert('사진 업로드 중 일부 오류가 발생했습니다.');
+                    };
+
+                    try {
+                      // Execute all in parallel
+                      await Promise.all(files.map((file, idx) => uploadFile(file, newUploading[idx].id)));
+                    } catch (err) {
+                      console.error('Parallel upload failure:', err);
+                      alert('업로드 중 일부 오류가 발생했습니다.');
                     } finally {
-                      setUploadingFiles([]);
-                      e.target.value = ''; // Reset input
+                      e.target.value = ''; // Success or fail, clear the input
                     }
                   }} />
                 </label>
