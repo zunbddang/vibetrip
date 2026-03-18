@@ -18,9 +18,13 @@ const PWAInstallPrompt = () => {
     }
 
     const handler = (e) => {
+      console.log('beforeinstallprompt event fired');
       e.preventDefault();
       setDeferredPrompt(e);
-      if (!isStandalone) setIsVisible(true);
+      // On PC/Android, always show the prompt if it's not already installed
+      if (!isStandalone) {
+        setIsVisible(true);
+      }
     };
 
     window.addEventListener('beforeinstallprompt', handler);
