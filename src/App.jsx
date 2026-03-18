@@ -67,6 +67,7 @@ import Auth from './Auth';
 import TripDashboard from './TripDashboard';
 import ShareModal from './ShareModal';
 import UserAvatar from './UserAvatar';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
 
 const DAY_COLORS = [
   '#ed4956', // Day 1: Red
@@ -219,6 +220,7 @@ const App = () => {
   const [mapZoom, setMapZoom] = useState(12);
   const [userLocation, setUserLocation] = useState(null);
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const mapSearchRef = useRef(null);
 
   // Handle URL Sharing
@@ -454,9 +456,8 @@ const App = () => {
 
   const uploadRemoteImage = async (url) => {
     if (!url || !session?.user?.id) return null;
+    setIsUploadingPhoto(true);
     try {
-      // Proxy or direct fetch? Browser might block CORS if Google doesn't allow direct fetch with Blob.
-      // Usually Google Places photo URLs allow CORS from any origin for getUrl results.
       const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to fetch image');
       const blob = await response.blob();
@@ -477,8 +478,10 @@ const App = () => {
 
       return publicUrl;
     } catch (err) {
-      console.warn('⚠️ Permanent upload failed, using temporary URL:', err);
-      return url; // Fallback to temp URL if upload fails
+      console.warn('⚠️ Permanent upload failed:', err);
+      return null; // Return null instead of temp URL to avoid saving temporary links
+    } finally {
+      setIsUploadingPhoto(false);
     }
   };
 
@@ -1677,13 +1680,19 @@ const App = () => {
                         <img 
                           src={selectedSpot.photoUrl} 
                           alt={selectedSpot.name} 
-                          className="drawer-photo" 
+                          className={`drawer-photo ${isUploadingPhoto ? 'uploading' : ''}`} 
                           onError={(e) => {
                             console.error('❌ Drawer photo failed to load (403/404).');
                             e.target.style.display = 'none';
                           }}
                         />
-                        {!isReadOnly && (
+                        {isUploadingPhoto && (
+                          <div className="photo-upload-overlay">
+                            <div className="spinner"></div>
+                            <span>사진 저장 중...</span>
+                          </div>
+                        )}
+                        {!isReadOnly && !isUploadingPhoto && (
                           <label className="photo-edit-overlay">
                             <Camera size={20} />
                             <input type="file" hidden accept="image/*" onChange={handleImageUpload} />
@@ -1693,9 +1702,9 @@ const App = () => {
                     ) : (
                       !isReadOnly && (
                         <label className="photo-upload-placeholder">
-                          <Upload size={32} />
-                          <span>사진 추가하기</span>
-                          <input type="file" hidden accept="image/*" onChange={handleImageUpload} />
+                          {isUploadingPhoto ? <div className="spinner"></div> : <Upload size={32} />}
+                          <span>{isUploadingPhoto ? '사진 저장 중...' : '사진 추가하기'}</span>
+                          {!isUploadingPhoto && <input type="file" hidden accept="image/*" onChange={handleImageUpload} />}
                         </label>
                       )
                     )}
@@ -1744,18 +1753,30 @@ const App = () => {
                   </div>
                   {!isReadOnly && (
                     String(selectedSpot.id).startsWith('temp-') ? (
-                      <button className="drawer-add-btn" onClick={() => {
-                        const finalSpot = { ...selectedSpot, id: Date.now(), day: formInput.day, date: formInput.date, type: formInput.type, memo: formInput.memo || selectedSpot.memo };
-                        setTripSpots(prev => [...prev, finalSpot].sort((a, b) => a.day !== b.day ? a.day - b.day : a.id - b.id));
-                        syncSpot(finalSpot); setSelectedSpot(null); setSearchedPlace(null);
-                      }}>내 여행에 담기</button>
+                      <button 
+                        className="drawer-add-btn" 
+                        disabled={isUploadingPhoto}
+                        onClick={() => {
+                          const finalSpot = { ...selectedSpot, id: Date.now(), day: formInput.day, date: formInput.date, type: formInput.type, memo: formInput.memo || selectedSpot.memo };
+                          setTripSpots(prev => [...prev, finalSpot].sort((a, b) => a.day !== b.day ? a.day - b.day : a.id - b.id));
+                          syncSpot(finalSpot); setSelectedSpot(null); setSearchedPlace(null);
+                        }}
+                      >
+                        {isUploadingPhoto ? '사진 처리 중...' : '내 여행에 담기'}
+                      </button>
                     ) : (
                       <div className="drawer-action-group">
-                        <button className="drawer-update-btn" onClick={() => {
-                          const updatedSpot = { ...selectedSpot, ...formInput };
-                          setTripSpots(prev => prev.map(s => s.id === selectedSpot.id ? updatedSpot : s).sort((a, b) => a.day !== b.day ? a.day - b.day : a.id - b.id));
-                          syncSpot(updatedSpot); setSelectedSpot(null);
-                        }}>수정 저장</button>
+                        <button 
+                          className="drawer-update-btn" 
+                          disabled={isUploadingPhoto}
+                          onClick={() => {
+                            const updatedSpot = { ...selectedSpot, ...formInput };
+                            setTripSpots(prev => prev.map(s => s.id === selectedSpot.id ? updatedSpot : s).sort((a, b) => a.day !== b.day ? a.day - b.day : a.id - b.id));
+                            syncSpot(updatedSpot); setSelectedSpot(null);
+                          }}
+                        >
+                          {isUploadingPhoto ? '저장 중...' : '수정 저장'}
+                        </button>
                         <button className="drawer-delete-btn-map" onClick={() => { handleDeleteRow(selectedSpot.id); setSelectedSpot(null); }}>일정 삭제</button>
                       </div>
                     )
@@ -2117,6 +2138,7 @@ const App = () => {
           </div>
         </div>
       )}
+      <PWAInstallPrompt />
     </div>
   );
 };
