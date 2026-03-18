@@ -60,6 +60,23 @@ const ShareModal = ({ isOpen, onClose, tripTitle, tripId }) => {
                     <input type="text" readOnly value={shareUrl} />
                     <button onClick={handleCopyLink}>복사</button>
                 </div>
+
+                <div className="share-qr-section">
+                    <div className="qr-container">
+                        <img 
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodedUrl}`} 
+                            alt="QR Code" 
+                            className="qr-code-img"
+                        />
+                    </div>
+                    <div className="qr-instructions">
+                        <p className="qr-main-text">QR 코드로 바로 기기에 설치하기</p>
+                        <p className="qr-sub-text">다른 사람의 아이폰 카메라로 스캔하면<br />바로 접속 및 설치가 가능합니다!</p>
+                        <div className="ios-badge">
+                            <span>iOS: Safari → [공유] → [홈 화면에 추가]</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     );

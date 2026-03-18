@@ -128,3 +128,94 @@
     }
   }
 }
+
+/* iOS Specific Guide UI */
+.pwa-ios-prompt-container {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 11000;
+  width: 90%;
+  max-width: 350px;
+  animation: iosBounce 1.5s infinite ease-in-out;
+}
+
+.pwa-ios-prompt-bubble {
+  background: white;
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  border: 1px solid #efefef;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.pwa-ios-content {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+}
+
+.pwa-app-icon.small {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+}
+
+.pwa-ios-text {
+  flex: 1;
+}
+
+.pwa-ios-text strong {
+  display: block;
+  font-size: 14px;
+  color: #262626;
+  margin-bottom: 4px;
+}
+
+.pwa-ios-text p {
+  margin: 0;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.ios-share-icon {
+  display: inline-flex;
+  background: #f0f0f0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin: 0 2px;
+  font-size: 14px;
+  color: #007aff;
+}
+
+.pwa-ios-close {
+  background: none;
+  border: none;
+  color: #ccc;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.pwa-ios-arrow {
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-top: 10px solid white;
+  filter: drop-shadow(0 4px 2px rgba(0, 0, 0, 0.05));
+}
+
+@keyframes iosBounce {
+  0%, 100% { transform: translate(-50%, 0); }
+  50% { transform: translate(-50%, -10px); }
+}
