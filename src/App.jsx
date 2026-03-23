@@ -546,7 +546,8 @@ const App = () => {
       is_bookmarked: spot.isBookmarked || false,
       comments: spot.comments || [],
       order_index: spot.orderIndex || 0,
-      uploader_name: spot.uploaderName || session.user.email.split('@')[0]
+      uploader_name: spot.uploaderName || session.user.email.split('@')[0],
+      place_id: spot.placeId || null
     };
 
     // If it's an update, preserve the original uploader's user_id
@@ -599,6 +600,16 @@ const App = () => {
   const handleShare = () => {
     if (currentTrip) setIsShareModalOpen(true);
   };
+
+  useEffect(() => {
+    const handleRefreshEvent = (e) => {
+      const spotId = e.detail;
+      const spot = tripSpots.find(s => String(s.id) === String(spotId));
+      if (spot) handleRefreshPhoto(spot);
+    };
+    window.addEventListener('refresh-photo', handleRefreshEvent);
+    return () => window.removeEventListener('refresh-photo', handleRefreshEvent);
+  }, [tripSpots, handleRefreshPhoto]);
 
   useEffect(() => {
     if ("geolocation" in navigator) {
@@ -674,6 +685,7 @@ const App = () => {
           type: "itinerary",
           memo: place.formatted_address,
           photoUrl: photoUrl,
+          placeId: place.place_id,
           day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
           date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0]
         };
@@ -776,6 +788,7 @@ const App = () => {
                   name: finalName,
                   memo: place.formatted_address,
                   photoUrl: photoUrl,
+                  placeId: place.place_id,
                   lat: place.geometry.location.lat(),
                   lng: place.geometry.location.lng(),
                   rating: place.rating,
@@ -1114,6 +1127,37 @@ const App = () => {
       console.error('Download failed:', err);
       // Last resort: Open in new tab
       window.open(url, '_blank');
+    }
+  };
+  
+  const handleRefreshPhoto = async (spot) => {
+    if (!spot.placeId || !window.google || !window.google.maps || isReadOnly) return;
+    
+    setIsLoading(true);
+    try {
+      const service = new window.google.maps.places.PlacesService(map);
+      service.getDetails({ placeId: spot.placeId }, async (place, status) => {
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.photos?.[0]) {
+          const newTempUrl = place.photos[0].getUrl({ maxWidth: 800, maxHeight: 800 });
+          const permUrl = await uploadRemoteImage(newTempUrl);
+          
+          if (permUrl) {
+            const updatedSpot = { ...spot, photoUrl: permUrl };
+            setTripSpots(prev => prev.map(s => s.id === spot.id ? updatedSpot : s));
+            await syncSpot(updatedSpot);
+            alert('사진이 성공적으로 갱신되었습니다! ✨');
+          } else {
+            throw new Error('사진 저장소 업로드 실패');
+          }
+        } else {
+          alert('장소 정보를 다시 가져올 수 없습니다. 장소가 폐업했거나 정보가 변경되었을 수 있습니다.');
+        }
+        setIsLoading(false);
+      });
+    } catch (err) {
+      console.error('Photo refresh failed:', err);
+      alert('사진 갱신 중 오류가 발생했습니다.');
+      setIsLoading(false);
     }
   };
 
@@ -1478,12 +1522,22 @@ const App = () => {
                               src={spot.photoUrl || spot.photo_url} 
                               alt={spot.name} 
                               onError={(e) => {
-                                console.warn('📸 Feed image load failed, hiding...');
+                                console.warn('📸 Feed image load failed.');
                                 e.target.style.display = 'none';
-                                e.target.parentElement.innerHTML = '<div class="empty-post-photo"><svg size="48" color="#ccc" ... /></div>';
-                                // Since we can't easily re-render the whole JSX here, 
-                                // it's better to just swap the display or use a state.
-                                // But for a one-off fix, hiding it is safest.
+                                const parent = e.target.parentElement;
+                                parent.classList.add('broken-image-container');
+                                if (!parent.querySelector('.refresh-overlay')) {
+                                  const overlay = document.createElement('div');
+                                  overlay.className = 'refresh-overlay';
+                                  overlay.innerHTML = `
+                                    <div class="empty-post-photo">
+                                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.83 6.72 2.24L21 8"/><path d="M21 3v5h-5"/></svg>
+                                      <p style="color: #8e8e8e; font-size: 13px; margin-top: 10px;">사진을 불러올 수 없습니다</p>
+                                      <button class="refresh-photo-btn" onclick="window.dispatchEvent(new CustomEvent('refresh-photo', {detail: '${spot.id}'}))">사진 새로고침</button>
+                                    </div>
+                                  `;
+                                  parent.appendChild(overlay);
+                                }
                               }}
                             />
                           ) : (
