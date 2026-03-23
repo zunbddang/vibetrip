@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   GoogleMap,
   useJsApiLoader,
@@ -601,6 +601,37 @@ const App = () => {
     if (currentTrip) setIsShareModalOpen(true);
   };
 
+  const handleRefreshPhoto = useCallback(async (spot) => {
+    if (!spot.placeId || !window.google || !window.google.maps || isReadOnly) return;
+    
+    setIsLoading(true);
+    try {
+      const service = new window.google.maps.places.PlacesService(map);
+      service.getDetails({ placeId: spot.placeId }, async (place, status) => {
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.photos?.[0]) {
+          const newTempUrl = place.photos[0].getUrl({ maxWidth: 800, maxHeight: 800 });
+          const permUrl = await uploadRemoteImage(newTempUrl);
+          
+          if (permUrl) {
+            const updatedSpot = { ...spot, photoUrl: permUrl };
+            setTripSpots(prev => prev.map(s => s.id === spot.id ? updatedSpot : s));
+            await syncSpot(updatedSpot);
+            alert('사진이 성공적으로 갱신되었습니다! ✨');
+          } else {
+            throw new Error('사진 저장소 업로드 실패');
+          }
+        } else {
+          alert('장소 정보를 다시 가져올 수 없습니다. 장소가 폐업했거나 정보가 변경되었을 수 있습니다.');
+        }
+        setIsLoading(false);
+      });
+    } catch (err) {
+      console.error('Photo refresh failed:', err);
+      alert('사진 갱신 중 오류가 발생했습니다.');
+      setIsLoading(false);
+    }
+  }, [map, isReadOnly, uploadRemoteImage, syncSpot]);
+
   useEffect(() => {
     const handleRefreshEvent = (e) => {
       const spotId = e.detail;
@@ -1130,37 +1161,6 @@ const App = () => {
     }
   };
   
-  const handleRefreshPhoto = async (spot) => {
-    if (!spot.placeId || !window.google || !window.google.maps || isReadOnly) return;
-    
-    setIsLoading(true);
-    try {
-      const service = new window.google.maps.places.PlacesService(map);
-      service.getDetails({ placeId: spot.placeId }, async (place, status) => {
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.photos?.[0]) {
-          const newTempUrl = place.photos[0].getUrl({ maxWidth: 800, maxHeight: 800 });
-          const permUrl = await uploadRemoteImage(newTempUrl);
-          
-          if (permUrl) {
-            const updatedSpot = { ...spot, photoUrl: permUrl };
-            setTripSpots(prev => prev.map(s => s.id === spot.id ? updatedSpot : s));
-            await syncSpot(updatedSpot);
-            alert('사진이 성공적으로 갱신되었습니다! ✨');
-          } else {
-            throw new Error('사진 저장소 업로드 실패');
-          }
-        } else {
-          alert('장소 정보를 다시 가져올 수 없습니다. 장소가 폐업했거나 정보가 변경되었을 수 있습니다.');
-        }
-        setIsLoading(false);
-      });
-    } catch (err) {
-      console.error('Photo refresh failed:', err);
-      alert('사진 갱신 중 오류가 발생했습니다.');
-      setIsLoading(false);
-    }
-  };
-
   const togglePhotoSelection = (id) => {
     setSelectedPhotos(prev => 
       prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]
