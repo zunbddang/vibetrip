@@ -1886,40 +1886,62 @@ const App = () => {
                       return new Promise((resolve) => {
                         const timeoutId = setTimeout(() => {
                           console.warn('EXIF timeout:', file.name);
-                          // Fallback to file modification date or current time
                           const fallbackDate = file.lastModified ? new Date(file.lastModified) : new Date();
-                          resolve(fallbackDate.toISOString());
+                          resolve({ takenAt: fallbackDate.toISOString(), lat: null, lng: null });
                         }, 5000);
 
                         EXIF.getData(file, function() {
                           clearTimeout(timeoutId);
+                          let takenAt = null;
+                          let lat = null;
+                          let lng = null;
+
                           try {
+                            // Extract Date
                             const dateTime = EXIF.getTag(this, "DateTimeOriginal") || EXIF.getTag(this, "DateTime");
                             if (dateTime && typeof dateTime === 'string') {
-                              // Standard EXIF format is "YYYY:MM:DD HH:MM:SS"
-                              // Some devices might use slightly different separators
                               const [datePart, timePart] = dateTime.split(/[\sT]/);
                               if (datePart && timePart) {
                                 const normalizedDate = datePart.replace(/:/g, '-');
-                                // Ensure it's YYYY-MM-DDTHH:MM:SS
-                                resolve(`${normalizedDate}T${timePart}`);
-                                return;
+                                takenAt = `${normalizedDate}T${timePart}`;
                               }
+                            }
+
+                            // Extract GPS
+                            const gpsLat = EXIF.getTag(this, "GPSLatitude");
+                            const gpsLng = EXIF.getTag(this, "GPSLongitude");
+                            const latRef = EXIF.getTag(this, "GPSLatitudeRef");
+                            const lngRef = EXIF.getTag(this, "GPSLongitudeRef");
+
+                            if (gpsLat && gpsLng && latRef && lngRef) {
+                              // Convert DMS to Decimal
+                              const toDecimal = (dms, ref) => {
+                                const d = dms[0].numerator / dms[0].denominator;
+                                const m = dms[1].numerator / dms[1].denominator;
+                                const s = dms[2].numerator / dms[2].denominator;
+                                let dec = d + m / 60 + s / 3600;
+                                if (ref === "S" || ref === "W") dec = -dec;
+                                return dec;
+                              };
+                              lat = toDecimal(gpsLat, latRef);
+                              lng = toDecimal(gpsLng, lngRef);
                             }
                           } catch (e) {
                             console.error('EXIF parse error:', e);
                           }
                           
-                          // Final fallback
-                          const finalFallback = file.lastModified ? new Date(file.lastModified) : new Date();
-                          resolve(finalFallback.toISOString());
+                          if (!takenAt) {
+                            takenAt = file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString();
+                          }
+                          
+                          resolve({ takenAt, lat, lng });
                         });
                       });
                     };
 
                     const uploadFile = async (file, uploadId) => {
                       try {
-                        const takenAt = await extractTakenDate(file);
+                        const { takenAt, lat, lng } = await extractTakenDate(file);
                         const fileExt = file.name.split('.').pop();
                         const fileName = `${session.user.id}/${Date.now()}_${Math.random()}.${fileExt}`;
                         
@@ -1933,7 +1955,9 @@ const App = () => {
                           user_id: session.user.id,
                           url: publicUrl,
                           uploader_name: session.user.email.split('@')[0],
-                          taken_at: takenAt
+                          taken_at: takenAt,
+                          lat: lat,
+                          lng: lng
                         };
                         
                         // Insert into 'photos' table
