@@ -1293,7 +1293,10 @@ const App = () => {
     
     const dates = [];
     (tripSpots || []).forEach(s => s.date && dates.push(s.date));
-    (tripPhotos || []).forEach(p => p.taken_at && dates.push(p.taken_at.split('T')[0]));
+    (tripPhotos || []).forEach(p => {
+      const dateVal = p.taken_at || p.created_at;
+      if (dateVal) dates.push(dateVal.split('T')[0]);
+    });
     
     if (dates.length === 0) return null;
     return dates.sort()[0];
@@ -1310,7 +1313,8 @@ const App = () => {
 
     const groups = {};
     sortedPhotos.forEach(photo => {
-      const date = photo.taken_at ? photo.taken_at.split('T')[0] : '전체';
+      const dateVal = photo.taken_at || photo.created_at;
+      const date = dateVal ? dateVal.split('T')[0] : '전체';
       if (!groups[date]) groups[date] = [];
       groups[date].push(photo);
     });
@@ -1869,8 +1873,8 @@ const App = () => {
                   </button>
                 )}
                 <label className="batch-upload-btn">
-                  <Upload size={16} /> 사진 업로드
-                  <input type="file" hidden multiple accept="image/*" onChange={async (e) => {
+                  <Upload size={16} /> 사진/영상 업로드
+                  <input type="file" hidden multiple accept="image/*,video/*" onChange={async (e) => {
                     const files = Array.from(e.target.files);
                     if (files.length === 0) return;
                     
@@ -1941,7 +1945,11 @@ const App = () => {
 
                     const uploadFile = async (file, uploadId) => {
                       try {
-                        const { takenAt, lat, lng } = await extractTakenDate(file);
+                        const isVideo = file.type.startsWith('video/');
+                        const { takenAt, lat, lng } = isVideo 
+                          ? { takenAt: file.lastModified ? new Date(file.lastModified).toISOString() : new Date().toISOString(), lat: null, lng: null }
+                          : await extractTakenDate(file);
+                        
                         const fileExt = file.name.split('.').pop();
                         const fileName = `${session.user.id}/${Date.now()}_${Math.random()}.${fileExt}`;
                         
@@ -1957,7 +1965,8 @@ const App = () => {
                           uploader_name: session.user.email.split('@')[0],
                           taken_at: takenAt,
                           lat: lat,
-                          lng: lng
+                          lng: lng,
+                          is_video: isVideo
                         };
                         
                         // Insert into 'photos' table
@@ -2063,14 +2072,25 @@ const App = () => {
                             className={`gallery-item ${selectedPhotos.includes(photo.id) ? 'selected' : ''}`}
                             onClick={() => setLightboxIndex(globalIdx)}
                           >
-                            <img 
-                              src={photo.url} 
-                              alt="Trip memory" 
-                              onError={(e) => {
-                                e.target.style.display = 'none';
-                                setTripPhotos(prev => prev.filter(p => p.id !== photo.id));
-                              }}
-                            />
+                            {photo.is_video ? (
+                              <video 
+                                src={photo.url} 
+                                className="gallery-video-preview"
+                                muted 
+                                playsInline 
+                                onMouseOver={e => e.target.play()} 
+                                onMouseOut={e => { e.target.pause(); e.target.currentTime = 0; }} 
+                              />
+                            ) : (
+                              <img 
+                                src={photo.url} 
+                                alt="Trip memory" 
+                                onError={(e) => {
+                                  e.target.style.display = 'none';
+                                  setTripPhotos(prev => prev.filter(p => p.id !== photo.id));
+                                }}
+                              />
+                            )}
                             <div className="gallery-item-overlay">
                               <div className="uploader-tag">@{photo.uploader_name || '익명'}</div>
                               <div className="gallery-item-actions" onClick={e => e.stopPropagation()}>
@@ -2189,7 +2209,16 @@ const App = () => {
       {lightboxIndex !== null && tripPhotos[lightboxIndex] && (
         <div className="lightbox-overlay" onClick={() => setLightboxIndex(null)}>
           <div className="lightbox-content" onClick={e => e.stopPropagation()}>
-            <img src={tripPhotos[lightboxIndex].url} alt="Lightbox view" className="lightbox-main-img" />
+            {tripPhotos[lightboxIndex].is_video ? (
+              <video 
+                src={tripPhotos[lightboxIndex].url} 
+                controls 
+                autoPlay 
+                className="lightbox-main-video"
+              />
+            ) : (
+              <img src={tripPhotos[lightboxIndex].url} alt="Lightbox view" className="lightbox-main-img" />
+            )}
             
             <button className="lightbox-nav-btn prev" onClick={() => setLightboxIndex((lightboxIndex - 1 + tripPhotos.length) % tripPhotos.length)}>
               ‹
