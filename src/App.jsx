@@ -48,6 +48,7 @@ import {
   Calendar,
   X,
   Check,
+  Play,
   Clock,
   Phone,
   Settings,
@@ -2073,22 +2074,40 @@ const App = () => {
                       
                       {photos.map((photo) => {
                         const globalIdx = tripPhotos.findIndex(p => p.id === photo.id);
-                        const isVideoFile = photo.is_video || photo.url.match(/\.(mp4|mov|webm|ogg|m4v)$|video/i);
+                        const isVideoFile = photo.is_video || (photo.url && photo.url.match(/\.(mp4|mov|webm|ogg|m4v)$|video/i));
                         return (
                           <div 
                             key={photo.id} 
                             className={`gallery-item ${selectedPhotos.includes(photo.id) ? 'selected' : ''}`}
                             onClick={() => setLightboxIndex(globalIdx)}
+                            onMouseOver={(e) => {
+                              if (isVideoFile) {
+                                const video = e.currentTarget.querySelector('video');
+                                if (video) video.play().catch(() => {});
+                              }
+                            }}
+                            onMouseOut={(e) => {
+                              if (isVideoFile) {
+                                const video = e.currentTarget.querySelector('video');
+                                if (video) {
+                                  video.pause();
+                                  video.currentTime = 0;
+                                }
+                              }
+                            }}
                           >
                             {isVideoFile ? (
-                              <video 
-                                src={photo.url} 
-                                className="gallery-video-preview"
-                                muted 
-                                playsInline 
-                                onMouseOver={e => e.target.play()} 
-                                onMouseOut={e => { e.target.pause(); e.target.currentTime = 0; }} 
-                              />
+                              <>
+                                <video 
+                                  src={photo.url} 
+                                  className="gallery-video-preview"
+                                  muted 
+                                  playsInline 
+                                />
+                                <div className="video-play-badge">
+                                  <Play size={16} fill="white" />
+                                </div>
+                              </>
                             ) : (
                               <img 
                                 src={photo.url} 
@@ -2217,7 +2236,7 @@ const App = () => {
       {lightboxIndex !== null && tripPhotos[lightboxIndex] && (
         <div className="lightbox-overlay" onClick={() => setLightboxIndex(null)}>
           <div className="lightbox-content" onClick={e => e.stopPropagation()}>
-            {tripPhotos[lightboxIndex].is_video || tripPhotos[lightboxIndex].url.match(/\.(mp4|mov|webm|ogg|m4v)$|video/i) ? (
+            {tripPhotos[lightboxIndex].is_video || (tripPhotos[lightboxIndex].url && tripPhotos[lightboxIndex].url.match(/\.(mp4|mov|webm|ogg|m4v)$|video/i)) ? (
               <video 
                 src={tripPhotos[lightboxIndex].url} 
                 controls 

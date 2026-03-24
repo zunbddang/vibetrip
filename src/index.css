@@ -441,6 +441,29 @@ body {
   transform: scale(1.02);
 }
 
+.video-play-badge {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 40px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+  transition: all 0.3s ease;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.gallery-item:hover .video-play-badge {
+  transform: translate(-50%, -50%) scale(1.1);
+  background: rgba(0, 0, 0, 0.6);
+}
+
 .gallery-item.selected {
   outline: 4px solid #3897f0;
   outline-offset: -4px;
@@ -1724,4 +1747,20 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.gallery-video-preview,
+.lightbox-main-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.video-placeholder-bg {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
