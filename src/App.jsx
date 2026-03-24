@@ -58,7 +58,13 @@ import {
   Trash,
   Users,
   Navigation,
-  List
+  List,
+  Plus,
+  Utensils,
+  Hotel,
+  Palmtree,
+  Bus,
+  CameraOff
 } from 'lucide-react';
 import './index.css';
 import './Drawer.css';
@@ -85,6 +91,42 @@ const getDayColor = (day) => {
   return DAY_COLORS[(day - 1) % DAY_COLORS.length];
 };
 
+const getDistanceString = (dist) => {
+  if (!dist) return null;
+  if (dist < 1000) return `${Math.round(dist)}m`;
+  return `${(dist / 1000).toFixed(1)}km`;
+};
+
+const SpotPlaceholder = ({ spot }) => {
+  const category = (spot.category || '').toLowerCase();
+  
+  let Icon = CameraOff;
+  let gradientClass = 'default';
+  
+  if (category.includes('food') || category.includes('caf') || category.includes('rest')) {
+    Icon = Utensils;
+    gradientClass = 'food';
+  } else if (category.includes('hotel') || category.includes('stay') || category.includes('lodg')) {
+    Icon = Hotel;
+    gradientClass = 'hotel';
+  } else if (category.includes('park') || category.includes('tour') || category.includes('attr')) {
+    Icon = Palmtree;
+    gradientClass = 'landmark';
+  } else if (category.includes('airport') || category.includes('station') || category.includes('terminal')) {
+    Icon = Bus;
+    gradientClass = 'transport';
+  }
+  
+  return (
+    <div className={`spot-placeholder ${gradientClass}`}>
+      <div className="placeholder-content">
+        <Icon size={48} className="placeholder-icon" strokeWidth={1.5} />
+        <span className="placeholder-label">Vibe Moments</span>
+      </div>
+      <div className="placeholder-pattern"></div>
+    </div>
+  );
+};
 const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => {
   const {
     attributes,
@@ -203,6 +245,8 @@ const App = () => {
   const [selectedPhotos, setSelectedPhotos] = useState([]); // For batch download
   const [uploadingFiles, setUploadingFiles] = useState([]); // For inline loading indicators
   const [albumSortOrder, setAlbumSortOrder] = useState('date-asc'); // date-asc, date-desc, upload-desc
+  const [brokenImages, setBrokenImages] = useState([]); // Track spots with broken photo URLs
+  const [refreshingImages, setRefreshingImages] = useState([]); // Track spots currently refreshing
   const [searchedPlace, setSearchedPlace] = useState(null);
   const [tripMembers, setTripMembers] = useState([]); // Members tracked via trip_members table
   const [map, setMap] = useState(null);
@@ -526,13 +570,10 @@ const App = () => {
   const isReadOnly = currentTrip && session?.user?.id !== currentTrip.owner_id;
 
   const syncSpot = async (spot) => {
-    // Only authenticated users can sync to the database
     if (!currentTrip || !session?.user?.id) return;
     
-    // Check if the spot already exists in the database (to handle ownership and IDs)
     const isPermanentId = spot.id && !String(spot.id).startsWith('temp-');
 
-    // Sanitize: Only send fields that exist in our database schema
     const dbSpot = {
       name: spot.name,
       lat: spot.lat,
@@ -551,11 +592,8 @@ const App = () => {
       place_id: spot.placeId || null
     };
 
-    // If it's an update, preserve the original uploader's user_id
-    // If it's a new spot, set the current user as owner
     if (isPermanentId) {
       dbSpot.id = spot.id;
-      // Note: We don't overwrite user_id on update to preserve original uploader
     } else {
       dbSpot.user_id = session.user.id;
     }
@@ -566,10 +604,32 @@ const App = () => {
         .upsert(dbSpot, { onConflict: 'id' })
         .select();
 
-      if (error) throw error;
-
-      // If it's a new spot, update its ID in local state with the DB-assigned ID
-      if (data && data[0] && !isPermanentId) {
+      if (error) {
+        console.warn('DB Sync Error (Full Metadata), retrying minimal:', error);
+        // Retry with minimal fields if new columns (like place_id) are missing
+        const minimalSpot = {
+          name: dbSpot.name,
+          lat: dbSpot.lat,
+          lng: dbSpot.lng,
+          type: dbSpot.type,
+          memo: dbSpot.memo,
+          photo_url: dbSpot.photo_url,
+          day: dbSpot.day,
+          date: dbSpot.date,
+          trip_id: dbSpot.trip_id,
+          user_id: dbSpot.user_id,
+          id: dbSpot.id
+        };
+        const { data: retryData, error: retryError } = await supabase
+          .from('spots')
+          .upsert(minimalSpot, { onConflict: 'id' })
+          .select();
+        
+        if (retryError) throw retryError;
+        if (retryData && retryData[0] && !isPermanentId) {
+          setTripSpots(prev => prev.map(s => s.id === spot.id ? { ...s, id: retryData[0].id, user_id: retryData[0].user_id } : s));
+        }
+      } else if (data && data[0] && !isPermanentId) {
         setTripSpots(prev => prev.map(s => s.id === spot.id ? { ...s, id: data[0].id, user_id: data[0].user_id } : s));
       }
     } catch (err) {
@@ -603,41 +663,48 @@ const App = () => {
   };
 
   const handleRefreshPhoto = useCallback(async (spot) => {
-    if (!spot.placeId || !window.google || !window.google.maps || isReadOnly) return;
+    if (!spot.placeId || !window.google || !window.google.maps) return;
     
-    setIsLoading(true);
+    const spotIdStr = String(spot.id);
+    setRefreshingImages(prev => [...prev, spotIdStr]);
+    
     try {
       const service = new window.google.maps.places.PlacesService(map);
       service.getDetails({ placeId: spot.placeId }, async (place, status) => {
         if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.photos?.[0]) {
           const newTempUrl = place.photos[0].getUrl({ maxWidth: 800, maxHeight: 800 });
-          const permUrl = await uploadRemoteImage(newTempUrl);
           
-          if (permUrl) {
-            const updatedSpot = { ...spot, photoUrl: permUrl };
-            setTripSpots(prev => prev.map(s => s.id === spot.id ? updatedSpot : s));
+          let permUrl = null;
+          if (!isReadOnly && session?.user?.id) {
+            permUrl = await uploadRemoteImage(newTempUrl);
+          }
+          
+          const updatedSpot = { ...spot, photoUrl: permUrl || newTempUrl }; // Use permUrl if available, else temp
+          
+          setTripSpots(prev => prev.map(s => String(s.id) === spotIdStr ? updatedSpot : s));
+          setBrokenImages(prev => prev.filter(id => String(id) !== spotIdStr));
+          
+          if (permUrl && !isReadOnly) {
             await syncSpot(updatedSpot);
-            alert('사진이 성공적으로 갱신되었습니다! ✨');
-          } else {
-            throw new Error('사진 저장소 업로드 실패');
           }
         } else {
-          alert('장소 정보를 다시 가져올 수 없습니다. 장소가 폐업했거나 정보가 변경되었을 수 있습니다.');
+          alert('장소 정보를 다시 가져올 수 없습니다.');
         }
-        setIsLoading(false);
+        setRefreshingImages(prev => prev.filter(id => id !== spotIdStr));
       });
     } catch (err) {
       console.error('Photo refresh failed:', err);
-      alert('사진 갱신 중 오류가 발생했습니다.');
-      setIsLoading(false);
+      setRefreshingImages(prev => prev.filter(id => id !== spotIdStr));
     }
-  }, [map, isReadOnly, uploadRemoteImage, syncSpot]);
+  }, [map, isReadOnly, session?.user?.id, uploadRemoteImage, syncSpot]);
 
   useEffect(() => {
     const handleRefreshEvent = (e) => {
       const spotId = e.detail;
       const spot = tripSpots.find(s => String(s.id) === String(spotId));
-      if (spot) handleRefreshPhoto(spot);
+      if (spot) {
+        handleRefreshPhoto(spot);
+      }
     };
     window.addEventListener('refresh-photo', handleRefreshEvent);
     return () => window.removeEventListener('refresh-photo', handleRefreshEvent);
@@ -1521,36 +1588,46 @@ const App = () => {
                           <div className="post-avatar">{currentIndex}</div>
                           <div className="post-username">{spot.name}</div>
                         </div>
-                        <div className="post-image">
-                          {(spot.photoUrl || spot.photo_url) ? (
+                      <div className="post-image">
+                        {(spot.photoUrl || spot.photo_url) && !brokenImages.includes(String(spot.id)) ? (
+                          spot.is_video ? (
+                            <video 
+                              src={spot.photoUrl || spot.photo_url} 
+                              className="post-video" 
+                              controls 
+                              loop 
+                              muted 
+                              playsInline
+                            />
+                          ) : (
                             <img 
                               src={spot.photoUrl || spot.photo_url} 
                               alt={spot.name} 
-                              onError={(e) => {
-                                console.warn('📸 Feed image load failed.');
-                                e.target.style.display = 'none';
-                                const parent = e.target.parentElement;
-                                parent.classList.add('broken-image-container');
-                                if (!parent.querySelector('.refresh-overlay')) {
-                                  const overlay = document.createElement('div');
-                                  overlay.className = 'refresh-overlay';
-                                  overlay.innerHTML = `
-                                    <div class="empty-post-photo">
-                                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.83 6.72 2.24L21 8"/><path d="M21 3v5h-5"/></svg>
-                                      <p style="color: #8e8e8e; font-size: 13px; margin-top: 10px;">사진을 불러올 수 없습니다</p>
-                                      <button class="refresh-photo-btn" onclick="window.dispatchEvent(new CustomEvent('refresh-photo', {detail: '${spot.id}'}))">사진 새로고침</button>
-                                    </div>
-                                  `;
-                                  parent.appendChild(overlay);
-                                }
+                              onError={() => {
+                                setBrokenImages(prev => [...new Set([...prev, String(spot.id)])]);
                               }}
                             />
-                          ) : (
-                            <div className="empty-post-photo">
-                              <MapPin size={48} color="#ccc" />
-                            </div>
-                          )}
-                        </div>
+                          )
+                        ) : refreshingImages.includes(String(spot.id)) ? (
+                          <div className="refresh-loading-overlay">
+                            <div className="spinner-blue"></div>
+                            <p style={{ color: '#0095f6', fontSize: '12px', marginTop: '8px' }}>사진 불러오는 중...</p>
+                          </div>
+                        ) : brokenImages.includes(String(spot.id)) ? (
+                          <div className="refresh-overlay-reactive">
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ccc" strokeWidth="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.83 6.72 2.24L21 8"/><path d="M21 3v5h-5"/></svg>
+                            <p style={{ color: '#8e8e8e', fontSize: '13px', margin: '8px 0' }}>사진을 불러올 수 없습니다</p>
+                            <button className="refresh-photo-btn" onClick={() => handleRefreshPhoto(spot)}>사진 갱신하기</button>
+                          </div>
+                        ) : spot.placeId ? (
+                          <div className="fetch-photo-overlay">
+                            <SpotPlaceholder spot={spot} />
+                            <button className="fetch-photo-btn" onClick={() => handleRefreshPhoto(spot)}>구글 사진 가져오기</button>
+                          </div>
+                        ) : (
+                          <SpotPlaceholder spot={spot} />
+                        )}
+                      </div>
                         <div className="post-actions">
                           <Heart
                             size={24}
@@ -1733,41 +1810,70 @@ const App = () => {
                     <h3>{isReadOnly ? '일정 확인하기' : (String(selectedSpot.id).startsWith('temp-') ? '일정 계획하기' : '일정 수정하기')}</h3>
                     <button className="drawer-close-btn" onClick={() => { setSelectedSpot(null); setSearchedPlace(null); }}>×</button>
                   </div>
-                  <div className="drawer-photo-section">
-                    {selectedSpot.photoUrl ? (
-                      <div className="drawer-photo-container">
-                        <img 
-                          src={selectedSpot.photoUrl} 
-                          alt={selectedSpot.name} 
-                          className={`drawer-photo ${isUploadingPhoto ? 'uploading' : ''}`} 
-                          onError={(e) => {
-                            console.error('❌ Drawer photo failed to load (403/404).');
-                            e.target.style.display = 'none';
-                          }}
-                        />
-                        {isUploadingPhoto && (
-                          <div className="photo-upload-overlay">
-                            <div className="spinner"></div>
-                            <span>사진 저장 중...</span>
-                          </div>
-                        )}
-                        {!isReadOnly && !isUploadingPhoto && (
-                          <label className="photo-edit-overlay">
-                            <Camera size={20} />
-                            <input type="file" hidden accept="image/*" onChange={handleImageUpload} />
+                    <div className="drawer-photo-section">
+                      {(selectedSpot.photoUrl && !brokenImages.includes(String(selectedSpot.id))) ? (
+                        <div className="drawer-photo-container">
+                          {selectedSpot.is_video ? (
+                            <video 
+                              src={selectedSpot.photoUrl} 
+                              className="drawer-photo" 
+                              controls 
+                              autoPlay 
+                              loop 
+                              muted 
+                              playsInline
+                            />
+                          ) : (
+                            <img 
+                              src={selectedSpot.photoUrl} 
+                              alt={selectedSpot.name} 
+                              className={`drawer-photo ${isUploadingPhoto || refreshingImages.includes(String(selectedSpot.id)) ? 'uploading' : ''}`} 
+                              onError={() => {
+                                setBrokenImages(prev => [...new Set([...prev, String(selectedSpot.id)])]);
+                              }}
+                            />
+                          )}
+                          {(isUploadingPhoto || refreshingImages.includes(String(selectedSpot.id))) && (
+                            <div className="photo-upload-overlay">
+                              <div className="spinner"></div>
+                              <span>{refreshingImages.includes(String(selectedSpot.id)) ? '사진 갱신 중...' : '사진 저장 중...'}</span>
+                            </div>
+                          )}
+                          {!isReadOnly && !isUploadingPhoto && (
+                            <label className="photo-edit-overlay">
+                              <Camera size={20} />
+                              <input type="file" hidden accept="image/*" onChange={handleImageUpload} />
+                            </label>
+                          )}
+                        </div>
+                      ) : refreshingImages.includes(String(selectedSpot.id)) ? (
+                        <div className="refresh-loading-overlay">
+                           <div className="spinner-blue"></div>
+                           <span>사진 갱신 중...</span>
+                        </div>
+                      ) : brokenImages.includes(String(selectedSpot.id)) ? (
+                        <div className="photo-upload-placeholder broken">
+                           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ccc" strokeWidth="2"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.83 6.72 2.24L21 8"/><path d="M21 3v5h-5"/></svg>
+                           <p>사진 로드 실패</p>
+                           <button className="refresh-photo-btn-mini" onClick={() => handleRefreshPhoto(selectedSpot)}>다시 불러오기</button>
+                        </div>
+                      ) : selectedSpot.placeId ? (
+                        <div className="photo-upload-placeholder fetch">
+                          <SpotPlaceholder spot={selectedSpot} />
+                          <button className="refresh-photo-btn-mini" onClick={() => handleRefreshPhoto(selectedSpot)}>구글 사진 가져오기</button>
+                        </div>
+                      ) : (
+                        !isReadOnly ? (
+                          <label className="photo-upload-placeholder">
+                            {isUploadingPhoto ? <div className="spinner"></div> : <SpotPlaceholder spot={selectedSpot} />}
+                            <span>{isUploadingPhoto ? '사진 저장 중...' : '사진 추가하기'}</span>
+                            {!isUploadingPhoto && <input type="file" hidden accept="image/*" onChange={handleImageUpload} />}
                           </label>
-                        )}
-                      </div>
-                    ) : (
-                      !isReadOnly && (
-                        <label className="photo-upload-placeholder">
-                          {isUploadingPhoto ? <div className="spinner"></div> : <Upload size={32} />}
-                          <span>{isUploadingPhoto ? '사진 저장 중...' : '사진 추가하기'}</span>
-                          {!isUploadingPhoto && <input type="file" hidden accept="image/*" onChange={handleImageUpload} />}
-                        </label>
-                      )
-                    )}
-                  </div>
+                        ) : (
+                          <SpotPlaceholder spot={selectedSpot} />
+                        )
+                      )}
+                    </div>
                   <div className="drawer-info">
                     <h4 className="drawer-title">{selectedSpot.name}</h4>
                     {selectedSpot.rating && (

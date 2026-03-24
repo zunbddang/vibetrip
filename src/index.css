@@ -672,7 +672,8 @@ body {
   background: #f8f9fa;
 }
 
-.refresh-overlay {
+.refresh-overlay, 
+.refresh-overlay-reactive {
   position: absolute;
   top: 0;
   left: 0;
@@ -698,11 +699,141 @@ body {
   font-weight: 600;
   cursor: pointer;
   margin-top: 15px;
-  transition: background 0.2s;
+  transition: background 0.2s, transform 0.1s;
 }
 
 .refresh-photo-btn:hover {
   background: #1877f2;
+}
+
+.refresh-photo-btn:active {
+  transform: scale(0.95);
+}
+
+.refresh-photo-btn-mini {
+  background: #0095f6;
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.refresh-photo-btn-mini:hover {
+  background: #1877f2;
+}
+
+/* Post/Spot Styles */
+.post-card {
+  background: white;
+  margin-bottom: 25px;
+  border-bottom: 1px solid #efefef;
+  display: flex;
+  flex-direction: column;
+}
+
+.post-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #fafafa;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.post-image img, 
+.post-image video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Spot Placeholder Premium Styles */
+.spot-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  color: white;
+  transition: transform 0.3s ease;
+}
+
+.spot-placeholder.food { background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%); }
+.spot-placeholder.hotel { background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%); }
+.spot-placeholder.landmark { background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%); }
+.spot-placeholder.transport { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%); }
+.spot-placeholder.default { background: linear-gradient(135deg, #cfd9df 0%, #e2ebf0 100%); }
+
+.placeholder-content {
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  animation: float 3s ease-in-out infinite;
+}
+
+.placeholder-icon {
+  filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1));
+}
+
+.placeholder-label {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+  opacity: 0.9;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.placeholder-pattern {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.15) 1px, transparent 0);
+  background-size: 24px 24px;
+  opacity: 0.5;
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+.drawer-photo-section {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #f0f0f0;
+  position: relative;
+  overflow: hidden;
+}
+
+.drawer-photo-container {
+  width: 100%;
+  height: 100%;
+}
+
+.drawer-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photo-upload-placeholder.broken {
+  background: #f8f9fa;
+  border: 1px dashed #dbdbdb;
 }
 
 .post-image img {
@@ -712,12 +843,59 @@ body {
   display: block;
 }
 
-.empty-post-photo {
+.refresh-loading-overlay,
+.fetch-photo-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.95);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.fetch-photo-btn {
+  background: white;
+  border: 1.5px solid #0095f6;
+  color: #0095f6;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 15px;
+  transition: all 0.2s;
+}
+
+.fetch-photo-btn:hover {
+  background: rgba(0, 149, 246, 0.05);
+}
+
+.spinner-blue {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(0, 149, 246, 0.2);
+  border-top: 3px solid #0095f6;
+  border-radius: 50%;
+  animation: rotate 0.8s linear infinite;
+}
+
+.drawer-photo-placeholder-wrapper {
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: #f8f9fa;
+}
+
+.photo-upload-placeholder.fetch {
+  border: none;
+  background: transparent;
 }
 
 .post-actions {
