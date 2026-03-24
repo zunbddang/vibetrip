@@ -1882,7 +1882,8 @@ const App = () => {
                     const newUploading = files.map(f => ({
                       id: `uploading-${Date.now()}-${Math.random()}`,
                       name: f.name,
-                      preview: URL.createObjectURL(f)
+                      preview: URL.createObjectURL(f),
+                      type: f.type
                     }));
                     setUploadingFiles(prev => [...prev, ...newUploading]);
                     
@@ -2056,7 +2057,13 @@ const App = () => {
                       {/* Uploading Placeholders */}
                       {date === '전체' && uploadingFiles.length > 0 && uploadingFiles.map(file => (
                         <div key={file.id} className="gallery-item uploading">
-                          <img src={file.preview} alt="uploading" style={{ opacity: 0.3 }} />
+                          {file.type && file.type.startsWith('video/') ? (
+                            <div className="video-placeholder-bg">
+                              <video src={file.preview} muted style={{ objectFit: 'cover', width: '100%', height: '100%', opacity: 0.3 }} />
+                            </div>
+                          ) : (
+                            <img src={file.preview} alt="uploading" style={{ opacity: 0.3 }} />
+                          )}
                           <div className="upload-spinner-overlay">
                             <div className="mini-spinner"></div>
                             <span className="upload-text">업로드 중...</span>
@@ -2066,13 +2073,14 @@ const App = () => {
                       
                       {photos.map((photo) => {
                         const globalIdx = tripPhotos.findIndex(p => p.id === photo.id);
+                        const isVideoFile = photo.is_video || photo.url.match(/\.(mp4|mov|webm|ogg|m4v)$|video/i);
                         return (
                           <div 
                             key={photo.id} 
                             className={`gallery-item ${selectedPhotos.includes(photo.id) ? 'selected' : ''}`}
                             onClick={() => setLightboxIndex(globalIdx)}
                           >
-                            {photo.is_video ? (
+                            {isVideoFile ? (
                               <video 
                                 src={photo.url} 
                                 className="gallery-video-preview"
@@ -2209,7 +2217,7 @@ const App = () => {
       {lightboxIndex !== null && tripPhotos[lightboxIndex] && (
         <div className="lightbox-overlay" onClick={() => setLightboxIndex(null)}>
           <div className="lightbox-content" onClick={e => e.stopPropagation()}>
-            {tripPhotos[lightboxIndex].is_video ? (
+            {tripPhotos[lightboxIndex].is_video || tripPhotos[lightboxIndex].url.match(/\.(mp4|mov|webm|ogg|m4v)$|video/i) ? (
               <video 
                 src={tripPhotos[lightboxIndex].url} 
                 controls 
