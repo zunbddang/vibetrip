@@ -169,6 +169,12 @@ const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => 
     }
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.target.blur();
+    }
+  };
+
   return (
     <div 
       ref={setNodeRef} 
@@ -194,6 +200,7 @@ const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => 
             value={localName}
             onChange={(e) => setLocalName(e.target.value)}
             onBlur={(e) => handleBlur('name', e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="장소명"
           />
           <button className="row-delete-btn" onClick={() => handleDeleteRow(spot.id)}>×</button>
@@ -207,6 +214,7 @@ const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => 
               value={localDay}
               onChange={(e) => setLocalDay(parseInt(e.target.value) || 1)}
               onBlur={(e) => handleBlur('day', parseInt(e.target.value) || 1)}
+              onKeyDown={handleKeyDown}
             />
             <span className="row-day-label">일차</span>
             <input
@@ -215,6 +223,7 @@ const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => 
               value={localDate}
               onChange={(e) => setLocalDate(e.target.value)}
               onBlur={(e) => handleBlur('date', e.target.value)}
+              onKeyDown={handleKeyDown}
             />
           </div>
           <input
@@ -223,6 +232,7 @@ const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => 
             value={localMemo}
             onChange={(e) => setLocalMemo(e.target.value)}
             onBlur={(e) => handleBlur('memo', e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="상세 메모"
           />
         </div>
@@ -586,7 +596,13 @@ const App = () => {
   const isReadOnly = currentTrip && session?.user?.id !== currentTrip.owner_id;
 
   const syncSpot = async (spot) => {
-    if (!currentTrip || !session?.user?.id) return;
+    if (!session?.user?.id) return;
+    
+    // Fallback trip_id if currentTrip is lost during navigation
+    const tripId = spot.trip_id || currentTrip?.id;
+    if (!tripId) return;
+
+    isSyncing.current = true;
     
     const isPermanentId = spot.id && !String(spot.id).startsWith('temp-');
 
@@ -599,7 +615,7 @@ const App = () => {
       photo_url: spot.photoUrl || null,
       day: spot.day || 1,
       date: spot.date,
-      trip_id: currentTrip.id,
+      trip_id: tripId,
       is_liked: spot.isLiked || false,
       is_bookmarked: spot.isBookmarked || false,
       comments: spot.comments || [],
@@ -623,7 +639,6 @@ const App = () => {
 
       if (error) {
         console.warn('DB Sync Error (Full Metadata), retrying minimal:', error);
-        // Retry with minimal fields if new columns (like place_id) are missing
         const minimalSpot = {
           name: dbSpot.name,
           lat: dbSpot.lat,
@@ -656,7 +671,11 @@ const App = () => {
       }
     } catch (err) {
       console.error('Error syncing spot:', err);
-      alert('일정 저장 실패: ' + err.message);
+    } finally {
+      // Small delay to ensure DB propagation before letting local state be overwritten by subscription
+      setTimeout(() => {
+        isSyncing.current = false;
+      }, 1000);
     }
   };
 
@@ -1008,27 +1027,20 @@ const App = () => {
   };
 
   const handleUpdateSpot = (id, field, value) => {
-    // If the user isn't logged in, they can't save anything permanently.
-    // Locally it will still update in the state.
+    const target = tripSpots.find(s => String(s.id) === String(id));
+    if (!target) return;
     
-    let updatedSpot = null;
+    const updatedSpot = { ...target, [field]: value };
+    
     setTripSpots(prev => {
-      const updated = prev.map(s => String(s.id) === String(id) ? { ...s, [field]: value } : s);
+      const updated = prev.map(s => String(s.id) === String(id) ? updatedSpot : s);
       return updated.sort((a, b) => {
         if (a.day !== b.day) return a.day - b.day;
         return (a.orderIndex || 0) - (b.orderIndex || 0);
       });
     });
 
-    // We use a small trick: if updatedSpot is still null (e.g. state was set but not yet updated),
-    // we find it directly from the current tripSpots.
-    // But since we are doing this synchronously, updatedSpot SHOULD be set if id matched.
-    if (!updatedSpot) {
-      const current = tripSpots.find(s => s.id === id);
-      if (current) updatedSpot = { ...current, [field]: value };
-    }
-
-    if (updatedSpot && session?.user?.id) {
+    if (session?.user?.id) {
       syncSpot(updatedSpot);
     }
   };
@@ -1255,9 +1267,12 @@ const App = () => {
   };
 
   const handleLogout = async () => {
+    // Ensure pending syncs are given a chance before session is wiped
+    if (isSyncing.current) {
+      await new Promise(r => setTimeout(r, 800));
+    }
     await supabase.auth.signOut();
     setSession(null);
-    // Removed setCurrentTrip(null) to keep trip visible after logout
   };
 
   const handleDownloadPhoto = async (url, filename) => {
@@ -1407,7 +1422,16 @@ const App = () => {
     }
   };
 
-  const handleBackToDashboard = () => {
+  const handleBackToDashboard = async () => {
+    // Auto-save map drawer content if it was being edited
+    if (selectedSpot && !isReadOnly && !String(selectedSpot.id).startsWith('temp-')) {
+       const updatedSpot = { ...selectedSpot, ...formInput };
+       syncSpot(updatedSpot);
+    }
+
+    // Small delay to allow fire-and-forget syncs to at least start their promises
+    await new Promise(r => setTimeout(r, 100));
+    
     setCurrentTrip(null);
     const url = new URL(window.location);
     url.searchParams.delete('trip');
@@ -1426,6 +1450,17 @@ const App = () => {
       setCurrentTrip(prev => ({ ...prev, ...updates }));
     }
   };
+
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (isSyncing.current) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   const computedStartDate = useMemo(() => {
     if (currentTrip?.start_date) return currentTrip.start_date;
@@ -1503,101 +1538,104 @@ const App = () => {
     isSyncing.current = true;
   };
 
-  const handleDragEnd = (event) => {
+  const handleDragEnd = async (event) => {
     setActiveId(null);
     const { active, over } = event;
     
-    // Guard will be released after DB sync completes or here if no move occurred
     if (!active || !over || String(active.id) === String(over.id)) {
       isSyncing.current = false;
       return;
     }
 
-    setTripSpots((items) => {
-      const oldIndex = items.findIndex((i) => String(i.id) === String(active.id));
-      const newIndex = items.findIndex((i) => String(i.id) === String(over.id));
-      
-      if (oldIndex !== -1 && newIndex !== -1) {
-        const activeItem = { ...items[oldIndex] };
-        const overItem = items[newIndex];
-
-        // If moved to a different day group
-        if (activeItem.day !== overItem.day) {
-          activeItem.day = overItem.day;
-          activeItem.date = overItem.date;
-        }
-
-        // Move the item in the local array
-        const reorderedItems = [...items];
-        reorderedItems.splice(oldIndex, 1);
-        reorderedItems.splice(newIndex, 0, activeItem);
-        
-        // Re-calibrate orderIndex for EVERYTHING to ensure consistency
-        const updatedItems = reorderedItems.map((item, index) => ({
-          ...item,
-          orderIndex: index
-        }));
-
-        // Sync with database
-        if (!isReadOnly) {
-          const changedSpots = updatedItems.filter((item, idx) => {
-            return String(items[idx]?.id) !== String(updatedItems[idx]?.id) || 
-                   items[idx]?.day !== updatedItems[idx]?.day ||
-                   items[idx]?.orderIndex !== idx;
-          });
-
-          if (changedSpots.length > 0) {
-            const dbSpots = changedSpots.map(spot => ({
-              id: spot.id,
-              name: spot.name,
-              lat: spot.lat,
-              lng: spot.lng,
-              type: spot.type,
-              memo: spot.memo,
-              photo_url: spot.photoUrl || null,
-              day: spot.day || 1,
-              date: spot.date,
-              trip_id: currentTrip.id,
-              is_liked: spot.isLiked || false,
-              is_bookmarked: spot.isBookmarked || false,
-              comments: spot.comments || [],
-              order_index: spot.orderIndex || 0,
-              uploader_name: spot.uploaderName || (session?.user?.email ? session.user.email.split('@')[0] : '익명'),
-              liked_by: spot.likedBy || [],
-              place_id: spot.placeId || null
-            })).filter(s => !String(s.id).startsWith('temp-'));
-
-            if (dbSpots.length > 0) {
-              isSyncing.current = true;
-              supabase.from('spots').upsert(dbSpots).then(({ error }) => {
-                if (error) {
-                  console.error('Batch sync error:', error);
-                  const minimalSpots = dbSpots.map(s => ({
-                    id: s.id, name: s.name, lat: s.lat, lng: s.lng, 
-                    type: s.type, memo: s.memo, photo_url: s.photo_url, 
-                    day: s.day, date: s.date, trip_id: s.trip_id,
-                    order_index: s.order_index
-                  }));
-                  supabase.from('spots').upsert(minimalSpots).catch(e => console.error('Retry error:', e));
-                }
-                
-                setTimeout(() => {
-                  isSyncing.current = false;
-                }, 1500);
-              });
-            } else {
-              isSyncing.current = false;
-            }
-          } else {
-            isSyncing.current = false;
-          }
-        }
-        
-        return updatedItems;
-      }
+    const oldIndex = tripSpots.findIndex((i) => String(i.id) === String(active.id));
+    const newIndex = tripSpots.findIndex((i) => String(i.id) === String(over.id));
+    
+    if (oldIndex === -1 || newIndex === -1) {
       isSyncing.current = false;
-      return items;
-    });
+      return;
+    }
+
+    const reorderedItems = [...tripSpots];
+    const activeItem = { ...reorderedItems[oldIndex] };
+    const overItem = reorderedItems[newIndex];
+
+    // If moved to a different day group
+    if (activeItem.day !== overItem.day) {
+      activeItem.day = overItem.day;
+      activeItem.date = overItem.date;
+    }
+
+    reorderedItems.splice(oldIndex, 1);
+    reorderedItems.splice(newIndex, 0, activeItem);
+    
+    // Re-calibrate orderIndex for EVERYTHING to ensure consistency
+    const updatedItems = reorderedItems.map((item, index) => ({
+      ...item,
+      orderIndex: index
+    }));
+
+    // Update local state immediately
+    setTripSpots(updatedItems);
+
+    // Sync with database
+    if (!isReadOnly && session?.user?.id) {
+      const changedSpots = updatedItems.filter((item, idx) => {
+        const original = tripSpots.find(s => s.id === item.id);
+        return !original || original.day !== item.day || original.orderIndex !== item.orderIndex;
+      });
+
+      if (changedSpots.length > 0) {
+        const dbSpots = changedSpots.map(spot => ({
+          id: spot.id,
+          name: spot.name,
+          lat: spot.lat,
+          lng: spot.lng,
+          type: spot.type,
+          memo: spot.memo,
+          photo_url: spot.photoUrl || null,
+          day: spot.day || 1,
+          date: spot.date,
+          trip_id: spot.trip_id || currentTrip.id,
+          is_liked: spot.isLiked || false,
+          is_bookmarked: spot.isBookmarked || false,
+          comments: spot.comments || [],
+          order_index: spot.orderIndex || 0,
+          uploader_name: spot.uploaderName || (session?.user?.email ? session.user.email.split('@')[0] : '익명'),
+          liked_by: spot.likedBy || [],
+          place_id: spot.placeId || null
+        })).filter(s => !String(s.id).startsWith('temp-'));
+
+        if (dbSpots.length > 0) {
+          isSyncing.current = true;
+          try {
+            const { error } = await supabase.from('spots').upsert(dbSpots);
+            if (error) {
+              console.error('Batch sync error:', error);
+              // Retry minimal
+              const minimalSpots = dbSpots.map(s => ({
+                id: s.id, name: s.name, lat: s.lat, lng: s.lng, 
+                type: s.type, memo: s.memo, photo_url: s.photo_url, 
+                day: s.day, date: s.date, trip_id: s.trip_id,
+                order_index: s.order_index
+              }));
+              await supabase.from('spots').upsert(minimalSpots);
+            }
+          } catch (e) {
+            console.error('Sync process failed:', e);
+          } finally {
+            setTimeout(() => {
+              isSyncing.current = false;
+            }, 1000);
+          }
+        } else {
+          isSyncing.current = false;
+        }
+      } else {
+        isSyncing.current = false;
+      }
+    } else {
+      isSyncing.current = false;
+    }
   };
 
   if (!session && !currentTrip) return <Auth onAuthSuccess={(user) => setSession({ user })} />;
