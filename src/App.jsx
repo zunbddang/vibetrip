@@ -368,7 +368,10 @@ const App = () => {
           comments: s.comments || [],
           orderIndex: s.order_index || 0,
           uploaderName: s.uploader_name || '익명'
-        }));
+        })).sort((a, b) => {
+          if (a.day !== b.day) return a.day - b.day;
+          return (a.orderIndex || 0) - (b.orderIndex || 0);
+        });
         setTripSpots(processedSpots);
         if (processedSpots.length > 0) {
           setMapCenter({ lat: processedSpots[0].lat, lng: processedSpots[0].lng });
@@ -429,8 +432,7 @@ const App = () => {
             };
             setTripSpots(prev => prev.map(s => s.id === updatedSpot.id ? updatedSpot : s).sort((a, b) => {
               if (a.day !== b.day) return a.day - b.day;
-              if (a.orderIndex !== b.orderIndex) return a.orderIndex - b.orderIndex;
-              return a.id - b.id;
+              return (a.orderIndex || 0) - (b.orderIndex || 0);
             }));
           } else if (payload.eventType === 'DELETE') {
             setTripSpots(prev => prev.filter(s => s.id !== payload.old.id));
@@ -633,7 +635,12 @@ const App = () => {
           date: dbSpot.date,
           trip_id: dbSpot.trip_id,
           user_id: dbSpot.user_id,
-          id: dbSpot.id
+          id: dbSpot.id,
+          is_liked: dbSpot.is_liked,
+          is_bookmarked: dbSpot.is_bookmarked,
+          comments: dbSpot.comments,
+          order_index: dbSpot.order_index,
+          uploader_name: dbSpot.uploader_name
         };
         const { data: retryData, error: retryError } = await supabase
           .from('spots')
@@ -642,10 +649,10 @@ const App = () => {
         
         if (retryError) throw retryError;
         if (retryData && retryData[0] && !isPermanentId) {
-          setTripSpots(prev => prev.map(s => s.id === spot.id ? { ...s, id: retryData[0].id, user_id: retryData[0].user_id } : s));
+          setTripSpots(prev => prev.map(s => String(s.id) === String(spot.id) ? { ...s, id: retryData[0].id, user_id: retryData[0].user_id } : s));
         }
       } else if (data && data[0] && !isPermanentId) {
-        setTripSpots(prev => prev.map(s => s.id === spot.id ? { ...s, id: data[0].id, user_id: data[0].user_id } : s));
+        setTripSpots(prev => prev.map(s => String(s.id) === String(spot.id) ? { ...s, id: data[0].id, user_id: data[0].user_id } : s));
       }
     } catch (err) {
       console.error('Error syncing spot:', err);
@@ -808,7 +815,8 @@ const App = () => {
           photoUrl: photoUrl,
           placeId: place.place_id,
           day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
-          date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0]
+          date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0],
+          orderIndex: tripSpots.length
         };
         setSearchedPlace(newPlace);
         setSelectedSpot(newPlace);
@@ -870,7 +878,8 @@ const App = () => {
         type: "itinerary",
         memo: "상세 정보를 가져오고 있습니다...",
         day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
-        date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0]
+        date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0],
+        orderIndex: tripSpots.length
       });
 
       const service = new window.google.maps.places.PlacesService(map);
@@ -937,8 +946,13 @@ const App = () => {
       lng,
       type: "itinerary",
       memo: "위치 정보를 불러오는 중입니다...",
-      day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
-      date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0]
+      day: tripSpots.filter(s => !selectedDay || String(s.day) === String(selectedDay)).length > 0 
+           ? tripSpots.filter(s => !selectedDay || String(s.day) === String(selectedDay)).slice(-1)[0].day 
+           : (selectedDay || 1),
+      date: tripSpots.filter(s => !selectedDay || String(s.day) === String(selectedDay)).length > 0 
+           ? tripSpots.filter(s => !selectedDay || String(s.day) === String(selectedDay)).slice(-1)[0].date 
+           : new Date().toISOString().split('T')[0],
+      orderIndex: tripSpots.length
     };
 
     setSelectedSpot(tempSpot);
@@ -999,12 +1013,10 @@ const App = () => {
     
     let updatedSpot = null;
     setTripSpots(prev => {
-      return prev.map(s => {
-        if (String(s.id) === String(id)) {
-          updatedSpot = { ...s, [field]: value };
-          return updatedSpot;
-        }
-        return s;
+      const updated = prev.map(s => String(s.id) === String(id) ? { ...s, [field]: value } : s);
+      return updated.sort((a, b) => {
+        if (a.day !== b.day) return a.day - b.day;
+        return (a.orderIndex || 0) - (b.orderIndex || 0);
       });
     });
 
@@ -1041,7 +1053,7 @@ const App = () => {
 
   const handleToggleBookmark = (id) => {
     // Local state update is allowed for everyone.
-    const spot = tripSpots.find(s => s.id === id);
+    const spot = tripSpots.find(s => String(s.id) === String(id));
     if (spot) {
       handleUpdateSpot(id, 'isBookmarked', !spot.isBookmarked);
     }
@@ -1063,20 +1075,20 @@ const App = () => {
   };
 
   const handleEditComment = (spotId, commentId, newText) => {
-    const spot = tripSpots.find(s => s.id === spotId);
+    const spot = tripSpots.find(s => String(s.id) === String(spotId));
     if (spot) {
-      const updatedComments = spot.comments.map(c =>
-        c.id === commentId && c.userId === session?.user?.id ? { ...c, text: newText } : c
+      const updatedComments = (spot.comments || []).map(c =>
+        String(c.id) === String(commentId) && c.userId === session?.user?.id ? { ...c, text: newText } : c
       );
       handleUpdateSpot(spotId, 'comments', updatedComments);
     }
   };
 
   const handleDeleteComment = (spotId, commentId) => {
-    const spot = tripSpots.find(s => s.id === spotId);
+    const spot = tripSpots.find(s => String(s.id) === String(spotId));
     if (spot) {
-      const updatedComments = spot.comments.filter(c =>
-        !(c.id === commentId && c.userId === session?.user?.id)
+      const updatedComments = (spot.comments || []).filter(c =>
+        !(String(c.id) === String(commentId) && c.userId === session?.user?.id)
       );
       handleUpdateSpot(spotId, 'comments', updatedComments);
     }
@@ -1115,12 +1127,39 @@ const App = () => {
       optimized.push(current);
     }
 
-    // Update orderIndex for each spot and sync
-    optimized.forEach((spot, idx) => {
-      const updated = { ...spot, orderIndex: idx };
-      setTripSpots(prev => prev.map(s => s.id === spot.id ? updated : s));
-      syncSpot(updated);
+    // Batch update orderIndex for local state and prepare for sync
+    const finalOptimized = optimized.map((spot, idx) => ({ ...spot, orderIndex: idx }));
+    
+    setTripSpots(prev => {
+      const updated = prev.map(s => {
+        const optSpot = finalOptimized.find(o => o.id === s.id);
+        return optSpot || s;
+      });
+      return updated.sort((a, b) => {
+        if (a.day !== b.day) return a.day - b.day;
+        return (a.orderIndex || 0) - (b.orderIndex || 0);
+      });
     });
+
+    // Batch sync to database
+    const dbSpots = finalOptimized.map(spot => ({
+      id: spot.id,
+      name: spot.name,
+      lat: spot.lat,
+      lng: spot.lng,
+      type: spot.type,
+      memo: spot.memo,
+      photo_url: spot.photoUrl || null,
+      day: spot.day || 1,
+      date: spot.date,
+      trip_id: currentTrip.id,
+      is_liked: spot.isLiked || false,
+      is_bookmarked: spot.isBookmarked || false,
+      comments: spot.comments || [],
+      order_index: spot.orderIndex,
+      uploader_name: spot.uploaderName || '익명'
+    }));
+    supabase.from('spots').upsert(dbSpots).catch(e => console.error(e));
     
     alert(`Day ${day} 동선이 최단 거리로 최적화되었습니다! ✨`);
   };
@@ -1142,6 +1181,7 @@ const App = () => {
       id: 'temp-' + Date.now(),
       day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
       date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0],
+      orderIndex: tripSpots.length,
       name: "새로운 장소",
       lat: mapCenter.lat,
       lng: mapCenter.lng,
@@ -1467,54 +1507,97 @@ const App = () => {
     setActiveId(null);
     const { active, over } = event;
     
-    // Release sync guard after a short delay to allow DB to settle
-    setTimeout(() => {
+    // Guard will be released after DB sync completes or here if no move occurred
+    if (!active || !over || String(active.id) === String(over.id)) {
       isSyncing.current = false;
-    }, 2000);
-
-    if (active && over && String(active.id) !== String(over.id)) {
-      setTripSpots((items) => {
-        const oldIndex = items.findIndex((i) => String(i.id) === String(active.id));
-        const newIndex = items.findIndex((i) => String(i.id) === String(over.id));
-        
-        if (oldIndex !== -1 && newIndex !== -1) {
-          const activeItem = { ...items[oldIndex] };
-          const overItem = items[newIndex];
-
-          // If moved to a different day group
-          if (activeItem.day !== overItem.day) {
-            activeItem.day = overItem.day;
-            activeItem.date = overItem.date;
-          }
-
-          // Move the item in the local array
-          const reorderedItems = [...items];
-          reorderedItems.splice(oldIndex, 1);
-          reorderedItems.splice(newIndex, 0, activeItem);
-          
-          // Re-calibrate orderIndex for EVERYTHING to ensure consistency
-          const updatedItems = reorderedItems.map((item, index) => ({
-            ...item,
-            orderIndex: index
-          }));
-
-          // Sync with database
-          if (!isReadOnly) {
-            updatedItems.forEach((item, idx) => {
-              // Sync if the item itself changed (day/date) or its position changed
-              if (items[idx]?.id !== updatedItems[idx]?.id || 
-                  items[idx]?.day !== updatedItems[idx]?.day ||
-                  items[idx]?.orderIndex !== idx) {
-                syncSpot(updatedItems[idx]);
-              }
-            });
-          }
-          
-          return updatedItems;
-        }
-        return items;
-      });
+      return;
     }
+
+    setTripSpots((items) => {
+      const oldIndex = items.findIndex((i) => String(i.id) === String(active.id));
+      const newIndex = items.findIndex((i) => String(i.id) === String(over.id));
+      
+      if (oldIndex !== -1 && newIndex !== -1) {
+        const activeItem = { ...items[oldIndex] };
+        const overItem = items[newIndex];
+
+        // If moved to a different day group
+        if (activeItem.day !== overItem.day) {
+          activeItem.day = overItem.day;
+          activeItem.date = overItem.date;
+        }
+
+        // Move the item in the local array
+        const reorderedItems = [...items];
+        reorderedItems.splice(oldIndex, 1);
+        reorderedItems.splice(newIndex, 0, activeItem);
+        
+        // Re-calibrate orderIndex for EVERYTHING to ensure consistency
+        const updatedItems = reorderedItems.map((item, index) => ({
+          ...item,
+          orderIndex: index
+        }));
+
+        // Sync with database
+        if (!isReadOnly) {
+          const changedSpots = updatedItems.filter((item, idx) => {
+            return String(items[idx]?.id) !== String(updatedItems[idx]?.id) || 
+                   items[idx]?.day !== updatedItems[idx]?.day ||
+                   items[idx]?.orderIndex !== idx;
+          });
+
+          if (changedSpots.length > 0) {
+            const dbSpots = changedSpots.map(spot => ({
+              id: spot.id,
+              name: spot.name,
+              lat: spot.lat,
+              lng: spot.lng,
+              type: spot.type,
+              memo: spot.memo,
+              photo_url: spot.photoUrl || null,
+              day: spot.day || 1,
+              date: spot.date,
+              trip_id: currentTrip.id,
+              is_liked: spot.isLiked || false,
+              is_bookmarked: spot.isBookmarked || false,
+              comments: spot.comments || [],
+              order_index: spot.orderIndex || 0,
+              uploader_name: spot.uploaderName || (session?.user?.email ? session.user.email.split('@')[0] : '익명'),
+              liked_by: spot.likedBy || [],
+              place_id: spot.placeId || null
+            })).filter(s => !String(s.id).startsWith('temp-'));
+
+            if (dbSpots.length > 0) {
+              isSyncing.current = true;
+              supabase.from('spots').upsert(dbSpots).then(({ error }) => {
+                if (error) {
+                  console.error('Batch sync error:', error);
+                  const minimalSpots = dbSpots.map(s => ({
+                    id: s.id, name: s.name, lat: s.lat, lng: s.lng, 
+                    type: s.type, memo: s.memo, photo_url: s.photo_url, 
+                    day: s.day, date: s.date, trip_id: s.trip_id,
+                    order_index: s.order_index
+                  }));
+                  supabase.from('spots').upsert(minimalSpots).catch(e => console.error('Retry error:', e));
+                }
+                
+                setTimeout(() => {
+                  isSyncing.current = false;
+                }, 1500);
+              });
+            } else {
+              isSyncing.current = false;
+            }
+          } else {
+            isSyncing.current = false;
+          }
+        }
+        
+        return updatedItems;
+      }
+      isSyncing.current = false;
+      return items;
+    });
   };
 
   if (!session && !currentTrip) return <Auth onAuthSuccess={(user) => setSession({ user })} />;
@@ -1533,7 +1616,10 @@ const App = () => {
         </header>
         <TripDashboard 
           session={session} 
-          onSelectTrip={(trip) => setCurrentTrip(trip)} 
+          onSelectTrip={(trip) => {
+            setTripSpots([]);
+            setCurrentTrip(trip);
+          }} 
           onLogout={handleLogout}
           onUpdateProfile={handleUpdateNickname}
         />
