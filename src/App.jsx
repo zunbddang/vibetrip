@@ -362,7 +362,8 @@ const App = () => {
         const processedSpots = (spotsRes.data || []).map(s => ({
           ...s,
           photoUrl: s.photo_url,
-          isLiked: s.is_liked || false,
+          isLiked: (s.liked_by || []).includes(session?.user?.id) || s.is_liked || false,
+          likedBy: s.liked_by || [],
           isBookmarked: s.is_bookmarked || false,
           comments: s.comments || [],
           orderIndex: s.order_index || 0,
@@ -419,7 +420,8 @@ const App = () => {
             const updatedSpot = {
               ...payload.new,
               photoUrl: payload.new.photo_url,
-              isLiked: payload.new.is_liked,
+              isLiked: (payload.new.liked_by || []).includes(session?.user?.id) || payload.new.is_liked,
+              likedBy: payload.new.liked_by || [],
               isBookmarked: payload.new.is_bookmarked,
               comments: payload.new.comments || [],
               orderIndex: payload.new.order_index || 0,
@@ -601,6 +603,7 @@ const App = () => {
       comments: spot.comments || [],
       order_index: spot.orderIndex || 0,
       uploader_name: spot.uploaderName || session.user.email.split('@')[0],
+      liked_by: spot.likedBy || [],
       place_id: spot.placeId || null
     };
 
@@ -997,7 +1000,7 @@ const App = () => {
     let updatedSpot = null;
     setTripSpots(prev => {
       return prev.map(s => {
-        if (s.id === id) {
+        if (String(s.id) === String(id)) {
           updatedSpot = { ...s, [field]: value };
           return updatedSpot;
         }
@@ -1019,11 +1022,20 @@ const App = () => {
   };
 
   const handleToggleLike = (id) => {
-    // Local state update is allowed for everyone. 
-    // handleUpdateSpot will check for session before calling syncSpot.
-    const spot = tripSpots.find(s => s.id === id);
+    if (!session?.user?.id) {
+      alert('로그인이 필요한 기능입니다. 😊');
+      return;
+    }
+    const spot = tripSpots.find(s => String(s.id) === String(id));
     if (spot) {
-      handleUpdateSpot(id, 'isLiked', !spot.isLiked);
+      const myId = session.user.id;
+      const currentLikedBy = Array.isArray(spot.likedBy) ? spot.likedBy : [];
+      const nextLikedBy = currentLikedBy.includes(myId)
+        ? currentLikedBy.filter(uid => uid !== myId)
+        : [...currentLikedBy, myId];
+      
+      handleUpdateSpot(id, 'likedBy', nextLikedBy);
+      handleUpdateSpot(id, 'isLiked', nextLikedBy.includes(myId));
     }
   };
 
@@ -1037,12 +1049,12 @@ const App = () => {
 
   const handleAddComment = (spotId, text) => {
     if (!session?.user?.id || !text.trim()) return;
-    const spot = tripSpots.find(s => s.id === spotId);
+    const spot = tripSpots.find(s => String(s.id) === String(spotId));
     if (spot) {
       const newComment = {
         id: Date.now(),
         userId: session.user.id,
-        userName: session.user.email.split('@')[0],
+        userName: session.user.user_metadata?.full_name || session.user.email.split('@')[0],
         text: text,
         createdAt: new Date().toISOString()
       };
@@ -1660,17 +1672,27 @@ const App = () => {
                         )}
                       </div>
                         <div className="post-actions">
-                          <Heart
-                            size={24}
-                            className={`action-icon ${spot.isLiked ? 'liked' : ''}`}
-                            onClick={() => handleToggleLike(spot.id)}
-                            fill={spot.isLiked ? "#ed4956" : "none"}
-                            color={spot.isLiked ? "#ed4956" : "currentColor"}
-                          />
-                          <MessageCircle size={24} className="action-icon" onClick={() => {
-                            const input = document.getElementById(`comment-input-${spot.id}`);
-                            if (input) input.focus();
-                          }} />
+                          <div className="action-item-wrapper">
+                            <Heart
+                              size={24}
+                              className={`action-icon heart-icon ${spot.isLiked ? 'liked' : ''}`}
+                              onClick={() => handleToggleLike(spot.id)}
+                              fill={spot.isLiked ? "#ed4956" : "none"}
+                              color={spot.isLiked ? "#ed4956" : "currentColor"}
+                            />
+                            {spot.likedBy?.length >= 2 && (
+                              <span className="likes-count-badge">{spot.likedBy.length}</span>
+                            )}
+                          </div>
+                          <div className="action-item-wrapper">
+                            <MessageCircle size={24} className="action-icon" onClick={() => {
+                              const input = document.getElementById(`comment-input-${spot.id}`);
+                              if (input) input.focus();
+                            }} />
+                            {spot.comments?.length > 0 && (
+                              <span className="comments-count-badge">{spot.comments.length}</span>
+                            )}
+                          </div>
                           <Bookmark
                             size={24}
                             className={`action-icon ${spot.isBookmarked ? 'bookmarked' : ''}`}
