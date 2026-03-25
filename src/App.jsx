@@ -1431,8 +1431,8 @@ const App = () => {
     const { active, over } = event;
     if (active && over && active.id !== over.id) {
       setTripSpots((items) => {
-        const oldIndex = items.findIndex((i) => i.id === active.id);
-        const newIndex = items.findIndex((i) => i.id === over.id);
+        const oldIndex = items.findIndex((i) => i.id == active.id);
+        const newIndex = items.findIndex((i) => i.id == over.id);
         
         if (oldIndex !== -1 && newIndex !== -1) {
           const activeItem = { ...items[oldIndex] };
