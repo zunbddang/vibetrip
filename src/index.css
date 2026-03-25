@@ -1120,13 +1120,33 @@ body {
   border-color: #dbdbdb;
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
+.modern-sheet-row.dragging {
+  opacity: 0.1;
+  background: #f8f9fa;
+  border: 1px dashed #dbdbdb;
+}
+.modern-sheet-row.drag-overlay {
+  box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+  border-color: var(--insta-blue);
+  background: white;
+  cursor: grabbing;
+  z-index: 10000;
+  opacity: 0.9;
+}
 
 .row-drag {
   display: flex;
   align-items: center;
-  padding: 0 4px;
-  cursor: grab;
+  justify-content: center;
+  padding: 0 12px;
+  cursor: grab !important;
   touch-action: none;
+  color: #dbdbdb;
+  transition: color 0.2s;
+}
+
+.row-drag:hover {
+  color: #8e8e8e;
 }
 
 .row-content {

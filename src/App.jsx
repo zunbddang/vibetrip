@@ -9,10 +9,15 @@ import {
 import {
   DndContext,
   closestCenter,
+  closestCorners,
   KeyboardSensor,
   PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
+  DragOverlay,
+  defaultDropAnimationSideEffects,
 } from '@dnd-kit/core';
 import {
   arrayMove,
@@ -135,7 +140,7 @@ const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => 
     transform,
     transition,
     isDragging
-  } = useSortable({ id: spot.id });
+  } = useSortable({ id: String(spot.id) });
 
   // Local states for smooth typing
   const [localName, setLocalName] = React.useState(spot.name || '');
@@ -165,7 +170,11 @@ const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => 
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="modern-sheet-row">
+    <div 
+      ref={setNodeRef} 
+      style={style} 
+      className={`modern-sheet-row ${isDragging ? 'dragging' : ''}`}
+    >
       <div className="row-drag" {...attributes} {...listeners}>
         <GripVertical size={16} color="#ccc" />
       </div>
@@ -247,6 +256,8 @@ const App = () => {
   const [albumSortOrder, setAlbumSortOrder] = useState('date-asc'); // date-asc, date-desc, upload-desc
   const [brokenImages, setBrokenImages] = useState([]); // Track spots with broken photo URLs
   const [refreshingImages, setRefreshingImages] = useState([]); // Track spots currently refreshing
+  const [activeId, setActiveId] = useState(null);
+  const isSyncing = useRef(false);
   const [searchedPlace, setSearchedPlace] = useState(null);
   const [tripMembers, setTripMembers] = useState([]); // Members tracked via trip_members table
   const [map, setMap] = useState(null);
@@ -385,6 +396,7 @@ const App = () => {
           filter: `trip_id=eq.${currentTrip.id}`
         },
         (payload) => {
+          if (isSyncing.current) return;
           if (payload.eventType === 'INSERT') {
             const newSpot = {
               ...payload.new,
@@ -654,8 +666,15 @@ const App = () => {
   }, [selectedSpot]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    useSensor(MouseSensor, {
+      activationConstraint: { distance: 5 },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 50, tolerance: 10 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
   );
 
   const handleShare = () => {
@@ -1427,12 +1446,24 @@ const App = () => {
     return `Day ${diffDays}`;
   };
 
+  const handleDragStart = (event) => {
+    setActiveId(event.active.id);
+    isSyncing.current = true;
+  };
+
   const handleDragEnd = (event) => {
+    setActiveId(null);
     const { active, over } = event;
-    if (active && over && active.id !== over.id) {
+    
+    // Release sync guard after a short delay to allow DB to settle
+    setTimeout(() => {
+      isSyncing.current = false;
+    }, 2000);
+
+    if (active && over && String(active.id) !== String(over.id)) {
       setTripSpots((items) => {
-        const oldIndex = items.findIndex((i) => i.id == active.id);
-        const newIndex = items.findIndex((i) => i.id == over.id);
+        const oldIndex = items.findIndex((i) => String(i.id) === String(active.id));
+        const newIndex = items.findIndex((i) => String(i.id) === String(over.id));
         
         if (oldIndex !== -1 && newIndex !== -1) {
           const activeItem = { ...items[oldIndex] };
@@ -2276,10 +2307,15 @@ const App = () => {
             </div>
 
             <div className="modern-list-wrapper">
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <DndContext 
+                sensors={sensors} 
+                collisionDetection={closestCorners} 
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+              >
                 <div className="modern-rows-container">
                   <SortableContext 
-                    items={tripSpots.filter(s => selectedDay === null || String(s.day) === String(selectedDay)).map(s => s.id)} 
+                    items={tripSpots.filter(s => selectedDay === null || String(s.day) === String(selectedDay)).map(s => String(s.id))} 
                     strategy={verticalListSortingStrategy}
                   >
                     {groupSpotsByDay.map((dayData) => (
@@ -2312,6 +2348,34 @@ const App = () => {
                     ))}
                   </SortableContext>
                 </div>
+
+                <DragOverlay dropAnimation={{
+                  sideEffects: defaultDropAnimationSideEffects({
+                    styles: {
+                      active: {
+                        opacity: '0.5',
+                      },
+                    },
+                  }),
+                }}>
+                  {activeId ? (
+                    <div className="modern-sheet-row drag-overlay">
+                      <div className="row-drag">
+                        <GripVertical size={16} color="#ccc" />
+                      </div>
+                      <div className="row-content">
+                        <div className="row-main-info">
+                          <div className="row-type-icon">
+                            <MapPin size={16} />
+                          </div>
+                          <div className="row-input-name">
+                            {tripSpots.find(s => String(s.id) === String(activeId))?.name}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </DragOverlay>
               </DndContext>
               
               {tripSpots.length === 0 && (
