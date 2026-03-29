@@ -377,7 +377,8 @@ const App = () => {
           isBookmarked: s.is_bookmarked || false,
           comments: s.comments || [],
           orderIndex: s.order_index || 0,
-          uploaderName: s.uploader_name || '익명'
+          uploaderName: s.uploader_name || '익명',
+          isVideo: s.is_video || false
         })).sort((a, b) => {
           if (a.day !== b.day) return a.day - b.day;
           return (a.orderIndex || 0) - (b.orderIndex || 0);
@@ -622,7 +623,8 @@ const App = () => {
       order_index: spot.orderIndex || 0,
       uploader_name: spot.uploaderName || session.user.email.split('@')[0],
       liked_by: spot.likedBy || [],
-      place_id: spot.placeId || null
+      place_id: spot.placeId || null,
+      is_video: spot.isVideo || false
     };
 
     if (isPermanentId) {
@@ -711,9 +713,15 @@ const App = () => {
   };
 
   const handleRefreshPhoto = useCallback(async (spot) => {
-    if (!spot.placeId || !window.google || !window.google.maps) return;
-    
     const spotIdStr = String(spot.id);
+    
+    // If it's a user upload (no placeId), just try to clear broken state once
+    if (!spot.placeId) {
+      setBrokenImages(prev => prev.filter(id => id !== spotIdStr));
+      return;
+    }
+    
+    if (!window.google || !window.google.maps) return;
     setRefreshingImages(prev => [...prev, spotIdStr]);
     
     try {
@@ -1704,11 +1712,11 @@ const App = () => {
         </div>
       </header>
 
-      <main style={{ flex: 1, overflowY: 'auto' }}>
+      <main style={{ flex: 1, overflowY: activeTab === 'map' ? 'hidden' : 'auto', position: 'relative' }}>
         {isLoading && <div className="loading-overlay"><div className="spinner"></div><span>불러오는 중...</span></div>}
 
         {currentTrip && tripSpots.length > 0 && activeTab !== 'gallery' && (
-          <div className="day-selector-container">
+          <div className={`day-selector-container ${activeTab === 'map' ? 'floating-map-days' : ''}`}>
             <button 
               className={`day-tab ${selectedDay === null ? 'active' : ''}`} 
               onClick={() => setSelectedDay(null)}
@@ -1988,11 +1996,11 @@ const App = () => {
                     <button className="drawer-close-btn" onClick={() => { setSelectedSpot(null); setSearchedPlace(null); }}>×</button>
                   </div>
                     <div className="drawer-photo-section">
-                      {(selectedSpot.photoUrl && !brokenImages.includes(String(selectedSpot.id))) ? (
+                      {(selectedSpot.photoUrl || selectedSpot.photo_url) && !brokenImages.includes(String(selectedSpot.id)) ? (
                         <div className="drawer-photo-container">
-                          {selectedSpot.is_video ? (
+                          {selectedSpot.isVideo || selectedSpot.is_video ? (
                             <video 
-                              src={selectedSpot.photoUrl} 
+                              src={selectedSpot.photoUrl || selectedSpot.photo_url} 
                               className="drawer-photo" 
                               controls 
                               autoPlay 
@@ -2002,7 +2010,7 @@ const App = () => {
                             />
                           ) : (
                             <img 
-                              src={selectedSpot.photoUrl} 
+                              src={selectedSpot.photoUrl || selectedSpot.photo_url} 
                               alt={selectedSpot.name} 
                               className={`drawer-photo ${isUploadingPhoto || refreshingImages.includes(String(selectedSpot.id)) ? 'uploading' : ''}`} 
                               onError={() => {
