@@ -1936,6 +1936,7 @@ const App = () => {
                 options={{ 
                   disableDefaultUI: true, 
                   zoomControl: true, 
+                  gestureHandling: 'greedy',
                   clickableIcons: true
                 }}
               >
