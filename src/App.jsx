@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
+  Polyline,
   GoogleMap,
   useJsApiLoader,
   Marker,
@@ -67,10 +68,15 @@ import {
   Plus,
   Utensils,
   Hotel,
-  Palmtree,
+  Palmtree as PalmTree,
   Bus,
-  CameraOff
+  CameraOff,
+  Car,
+  Footprints,
+  RefreshCcw,
+  Train
 } from 'lucide-react';
+
 import './index.css';
 import './Drawer.css';
 import './Dashboard.css';
@@ -103,7 +109,7 @@ const getDistanceString = (dist) => {
 };
 
 const SpotPlaceholder = ({ spot }) => {
-  const category = (spot.category || '').toLowerCase();
+  const category = (spot.category || spot.type || '').toLowerCase();
   
   let Icon = CameraOff;
   let gradientClass = 'default';
@@ -115,9 +121,9 @@ const SpotPlaceholder = ({ spot }) => {
     Icon = Hotel;
     gradientClass = 'hotel';
   } else if (category.includes('park') || category.includes('tour') || category.includes('attr')) {
-    Icon = Palmtree;
+    Icon = PalmTree;
     gradientClass = 'landmark';
-  } else if (category.includes('airport') || category.includes('station') || category.includes('terminal')) {
+  } else if (category.includes('airport') || category.includes('station') || category.includes('terminal') || category.includes('transport')) {
     Icon = Bus;
     gradientClass = 'transport';
   }
@@ -125,14 +131,22 @@ const SpotPlaceholder = ({ spot }) => {
   return (
     <div className={`spot-placeholder ${gradientClass}`}>
       <div className="placeholder-content">
-        <Icon size={48} className="placeholder-icon" strokeWidth={1.5} />
-        <span className="placeholder-label">Vibe Moments</span>
+        <Icon size={40} className="placeholder-icon pulse" strokeWidth={1} />
+        <span className="placeholder-label">Vibe Moment</span>
+        <p className="placeholder-sub" style={{ fontSize: '12px', opacity: 0.8, marginTop: '8px' }}>
+          {spot.placeId ? "AI가 구글의 최근 사진을 불러오는 중입니다" : "직접 사진을 등록해 소중한 순간을 기록해 보세요"}
+        </p>
       </div>
       <div className="placeholder-pattern"></div>
     </div>
   );
 };
-const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => {
+
+const TransportDivider = React.memo(({ origin, destination, isReadOnly, handleUpdateSpot }) => {
+  return null; // Temporarily disabled
+});
+
+const SortableRow = React.memo(({ spot, prevSpot, isReadOnly, handleUpdateSpot, handleDeleteRow }) => {
   const {
     attributes,
     listeners,
@@ -179,13 +193,14 @@ const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => 
     <div 
       ref={setNodeRef} 
       style={style} 
-      className={`modern-sheet-row ${isDragging ? 'dragging' : ''}`}
+      className={`modern-sheet-row-wrapper ${isDragging ? 'dragging' : ''}`}
     >
-      <div className="row-drag" {...attributes} {...listeners}>
-        <GripVertical size={16} color="#ccc" />
-      </div>
-      
-      <div className="row-content">
+      <div className={`modern-sheet-row ${isDragging ? 'dragging' : ''}`}>
+        <div className="row-drag" {...attributes} {...listeners}>
+          <GripVertical size={16} color="#ccc" />
+        </div>
+        
+        <div className="row-content">
         <div className="row-main-info">
           <div className="row-type-icon" title={spot.type}>
             {spot.type === 'food' ? <Heart size={16} fill="#ed4956" color="#ed4956" /> : 
@@ -238,7 +253,8 @@ const SortableRow = React.memo(({ spot, handleUpdateSpot, handleDeleteRow }) => 
         </div>
       </div>
     </div>
-  );
+  </div>
+);
 });
 
 const GALLERY_DATA = [
@@ -378,7 +394,8 @@ const App = () => {
           comments: s.comments || [],
           orderIndex: s.order_index || 0,
           uploaderName: s.uploader_name || '익명',
-          isVideo: s.is_video || false
+          isVideo: s.is_video || false,
+          placeId: s.place_id || null
         })).sort((a, b) => {
           if (a.day !== b.day) return a.day - b.day;
           return (a.orderIndex || 0) - (b.orderIndex || 0);
@@ -420,7 +437,8 @@ const App = () => {
               isBookmarked: payload.new.is_bookmarked,
               comments: payload.new.comments || [],
               orderIndex: payload.new.order_index || 0,
-              uploaderName: payload.new.uploader_name || '익명'
+              uploaderName: payload.new.uploader_name || '익명',
+              placeId: payload.new.place_id || null
             };
             setTripSpots(prev => {
               if (prev.find(s => s.id === newSpot.id)) return prev;
@@ -439,7 +457,8 @@ const App = () => {
               isBookmarked: payload.new.is_bookmarked,
               comments: payload.new.comments || [],
               orderIndex: payload.new.order_index || 0,
-              uploaderName: payload.new.uploader_name || '익명'
+              uploaderName: payload.new.uploader_name || '익명',
+              placeId: payload.new.place_id || null
             };
             setTripSpots(prev => prev.map(s => s.id === updatedSpot.id ? updatedSpot : s).sort((a, b) => {
               if (a.day !== b.day) return a.day - b.day;
@@ -531,7 +550,7 @@ const App = () => {
     setIsUploadingPhoto(true);
     try {
       const response = await fetch(url);
-      if (!response.ok) throw new Error('Failed to fetch image');
+      if (!response.ok) throw new Error(`Fetch failed with status ${response.status}`);
       const blob = await response.blob();
       
       const fileExt = 'jpg';
@@ -542,7 +561,10 @@ const App = () => {
         .from('trip-photos')
         .upload(filePath, blob);
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('Supabase upload error:', uploadError);
+        throw new Error(`저장소 업로드 실패: ${uploadError.message}`);
+      }
 
       const { data: { publicUrl } } = supabase.storage
         .from('trip-photos')
@@ -550,8 +572,8 @@ const App = () => {
 
       return publicUrl;
     } catch (err) {
-      console.warn('⚠️ Permanent upload failed:', err);
-      return null; // Return null instead of temp URL to avoid saving temporary links
+      console.warn('⚠️ Permanent upload failed (likely CORS):', err);
+      return null;
     } finally {
       setIsUploadingPhoto(false);
     }
@@ -560,6 +582,12 @@ const App = () => {
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || !session?.user?.id) return;
+
+    // Use current selectedSpot or fallback to a safety check
+    if (!selectedSpot) {
+      alert('업로드할 장소가 선택되지 않았습니다.');
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -571,24 +599,35 @@ const App = () => {
         .from('trip-photos')
         .upload(filePath, file);
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('Manual upload error:', uploadError);
+        throw new Error(`업로드 실패: ${uploadError.message}`);
+      }
 
       const { data: { publicUrl } } = supabase.storage
         .from('trip-photos')
         .getPublicUrl(filePath);
 
       const uploaderName = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
-      setSelectedSpot(prev => ({ ...prev, photoUrl: publicUrl, uploaderName }));
-      // If it's an existing spot, sync immediately
-      if (selectedSpot && !String(selectedSpot.id).startsWith('temp-')) {
-        syncSpot({ ...selectedSpot, photoUrl: publicUrl, uploaderName });
+      
+      const updatedSpot = { ...selectedSpot, photoUrl: publicUrl, photo_url: publicUrl, uploaderName };
+      
+      // Update local state for both feed and details
+      setSelectedSpot(updatedSpot);
+      setTripSpots(prev => prev.map(s => String(s.id) === String(selectedSpot.id) ? updatedSpot : s));
+
+      // Sync to DB
+      if (!String(selectedSpot.id).startsWith('temp-')) {
+        await syncSpot(updatedSpot);
       }
+      
+      alert('사진 등록이 완료되었습니다!');
     } catch (err) {
       console.error('Error uploading image:', err);
-      let errorMsg = '이미지 업로드에 실패했습니다.';
+      let errorMsg = `이미지 업로드 실패: ${err.message}`;
       if (err.message.includes('storage/quota-exceeded')) errorMsg = '저장 공간이 부족합니다.';
       else if (err.message.includes('auth')) errorMsg = '인증 세션이 만료되었습니다. 다시 로그인해주세요.';
-      alert(errorMsg + '\n(Error: ' + err.message + ')');
+      alert(errorMsg);
     } finally {
       setIsLoading(false);
     }
@@ -715,41 +754,71 @@ const App = () => {
   const handleRefreshPhoto = useCallback(async (spot) => {
     const spotIdStr = String(spot.id);
     
-    // If it's a user upload (no placeId), just try to clear broken state once
-    if (!spot.placeId) {
-      setBrokenImages(prev => prev.filter(id => id !== spotIdStr));
-      return;
-    }
-    
-    if (!window.google || !window.google.maps) return;
+    if (!window.google || !window.google.maps || !map) return;
     setRefreshingImages(prev => [...prev, spotIdStr]);
     
-    try {
-      const service = new window.google.maps.places.PlacesService(map);
-      service.getDetails({ placeId: spot.placeId }, async (place, status) => {
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.photos?.[0]) {
-          const newTempUrl = place.photos[0].getUrl({ maxWidth: 800, maxHeight: 800 });
-          
-          let permUrl = null;
-          if (!isReadOnly && session?.user?.id) {
-            permUrl = await uploadRemoteImage(newTempUrl);
-          }
-          
-          const updatedSpot = { ...spot, photoUrl: permUrl || newTempUrl }; // Use permUrl if available, else temp
-          
-          setTripSpots(prev => prev.map(s => String(s.id) === spotIdStr ? updatedSpot : s));
-          setBrokenImages(prev => prev.filter(id => String(id) !== spotIdStr));
-          
-          if (permUrl && !isReadOnly) {
-            await syncSpot(updatedSpot);
-          }
-        } else {
-          alert('장소 정보를 다시 가져올 수 없습니다.');
+    const service = new window.google.maps.places.PlacesService(map);
+
+    const processPlaceResult = async (place) => {
+      if (place?.photos?.[0]) {
+        const newTempUrl = place.photos[0].getUrl({ maxWidth: 800, maxHeight: 800 });
+        let permUrl = null;
+        if (!isReadOnly && session?.user?.id) {
+          permUrl = await uploadRemoteImage(newTempUrl);
         }
+        
+        const updatedSpot = { 
+          ...spot, 
+          photoUrl: permUrl || newTempUrl,
+          photo_url: permUrl || newTempUrl,
+          placeId: place.place_id || spot.placeId 
+        };
+        
+        setTripSpots(prev => prev.map(s => String(s.id) === spotIdStr ? updatedSpot : s));
+        setBrokenImages(prev => prev.filter(id => String(id) !== spotIdStr));
+        
+        if (permUrl && !isReadOnly) {
+          await syncSpot(updatedSpot);
+        }
+        return true;
+      }
+      return false;
+    };
+
+    try {
+      if (spot.placeId) {
+        service.getDetails({ placeId: spot.placeId, fields: ['photos', 'place_id'] }, async (place, status) => {
+          if (status === window.google.maps.places.PlacesServiceStatus.OK) {
+            const success = await processPlaceResult(place);
+            if (!success) alert('해당 장소의 새로운 사진을 찾을 수 없습니다.');
+          } else {
+            alert('장소 정보를 가져올 수 없습니다. 장소 이름을 다시 확인해주세요.');
+          }
+          setRefreshingImages(prev => prev.filter(id => id !== spotIdStr));
+        });
+      } else if (spot.name) {
+        // Smart Recovery: Search by name if placeId is missing
+        service.findPlaceFromQuery({
+          query: spot.name,
+          fields: ['photos', 'place_id', 'formatted_address']
+        }, async (results, status) => {
+          if (status === window.google.maps.places.PlacesServiceStatus.OK && results?.[0]) {
+            const success = await processPlaceResult(results[0]);
+            if (success) {
+              alert(`'${spot.name}' 장소를 찾아서 사진을 복구했습니다.`);
+            } else {
+              alert('장소는 찾았으나 등록된 사진이 없습니다.');
+            }
+          } else {
+            alert(`'${spot.name}'에 대한 정확한 장소 정보를 찾을 수 없습니다. 사진을 직접 등록해 주세요.`);
+          }
+          setRefreshingImages(prev => prev.filter(id => id !== spotIdStr));
+        });
+      } else {
         setRefreshingImages(prev => prev.filter(id => id !== spotIdStr));
-      });
+      }
     } catch (err) {
-      console.error('Photo refresh failed:', err);
+      console.error('Photo search failed:', err);
       setRefreshingImages(prev => prev.filter(id => id !== spotIdStr));
     }
   }, [map, isReadOnly, session?.user?.id, uploadRemoteImage, syncSpot]);
@@ -1802,6 +1871,40 @@ const App = () => {
                         ) : (
                           <SpotPlaceholder spot={spot} />
                         )}
+                        {!isReadOnly && (
+                          <button 
+                            className="photo-recovery-btn flex-center" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Prefer Refresh if it's a named spot or broken image
+                              if (spot.placeId || spot.name) handleRefreshPhoto(spot);
+                              else {
+                                setSelectedSpot(spot);
+                                setTimeout(() => {
+                                  const fileInput = document.getElementById(`feed-image-upload-${spot.id}`);
+                                  if (fileInput) fileInput.click();
+                                }, 100);
+                              }
+                            }}
+                            disabled={refreshingImages.includes(String(spot.id)) || isUploadingPhoto}
+                            title={spot.placeId || spot.name ? "AI 사진 복구/갱신" : "사진 올리기"}
+                          >
+                            {refreshingImages.includes(String(spot.id)) || (isUploadingPhoto && selectedSpot?.id === spot.id) ? (
+                              <div className="spinner-mini"></div>
+                            ) : (spot.placeId || spot.name) ? (
+                              <RefreshCcw size={18} strokeWidth={2.5} />
+                            ) : (
+                              <Camera size={18} strokeWidth={2.5} />
+                            )}
+                            <input 
+                              type="file" 
+                              id={`feed-image-upload-${spot.id}`} 
+                              hidden 
+                              accept="image/*" 
+                              onChange={handleImageUpload} 
+                            />
+                          </button>
+                        )}
                       </div>
                         <div className="post-actions">
                           <div className="action-item-wrapper">
@@ -1940,6 +2043,43 @@ const App = () => {
                   clickableIcons: true
                 }}
               >
+                {/* Interactive Lines (Polylines) */}
+                {(() => {
+                  const dayColors = { 1: '#ed4956', 2: '#0095f6', 3: '#16a34a', 4: '#f59e0b', 5: '#a855f7', 6: '#06b6d4', 7: '#ec4899' };
+                  if (selectedDay !== null) {
+                    const sortedDaySpots = tripSpots.filter(s => s.day === selectedDay).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+                    if (sortedDaySpots.length < 2) return null;
+                    return (
+                      <Polyline
+                        path={sortedDaySpots.map(s => ({ lat: s.lat, lng: s.lng }))}
+                        options={{
+                          strokeColor: dayColors[selectedDay] || '#262626',
+                          strokeOpacity: 0.6,
+                          strokeWeight: 4,
+                          icons: [{ icon: { path: window.google?.maps?.SymbolPath?.FORWARD_CLOSED_ARROW }, offset: "100%", repeat: "100px" }]
+                        }}
+                      />
+                    );
+                  } else {
+                    // All days view
+                    return uniqueDays.map(day => {
+                      const daySpotsForLine = tripSpots.filter(s => s.day === day).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+                      if (daySpotsForLine.length < 2) return null;
+                      return (
+                        <Polyline
+                          key={`line-day-${day}`}
+                          path={daySpotsForLine.map(s => ({ lat: s.lat, lng: s.lng }))}
+                          options={{
+                            strokeColor: dayColors[day] || '#262626',
+                            strokeOpacity: 0.4,
+                            strokeWeight: 3,
+                          }}
+                        />
+                      );
+                    });
+                  }
+                })()}
+
                 {tripSpots.filter(s => selectedDay === null || s.day === selectedDay).map((spot, idx) => (
                   <Marker
                     key={spot.id}
@@ -2490,10 +2630,12 @@ const App = () => {
                           )}
                         </div>
                         <div className="day-spots-list">
-                          {dayData.spots.map((spot) => (
+                          {dayData.spots.map((spot, index) => (
                             <SortableRow 
                               key={spot.id} 
                               spot={spot} 
+                              prevSpot={index > 0 ? dayData.spots[index - 1] : null}
+                              isReadOnly={isReadOnly}
                               handleUpdateSpot={handleUpdateSpot} 
                               handleDeleteRow={handleDeleteRow} 
                             />

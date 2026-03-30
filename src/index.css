@@ -2080,7 +2080,108 @@ body {
   padding: 0;
 }
 
+.travel-time-loading {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid rgba(0,0,0,0.1);
+  border-top-color: var(--insta-blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .comment-ops button:hover {
   color: #262626;
   text-decoration: underline;
+}
+
+/* Map Theme Switcher Styles - REMOVED */
+
+/* Feed Photo Recovery/Refresh Button (Smart Recovery) */
+.photo-recovery-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 50% !important;
+  width: 44px;
+  height: 44px;
+  padding: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0095f6 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 1000;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  cursor: pointer;
+  border: none;
+}
+
+.photo-recovery-btn:hover {
+  transform: scale(1.1) rotate(15deg);
+  background: #ffffff !important;
+  box-shadow: 0 12px 32px rgba(0, 149, 246, 0.3);
+}
+
+.photo-recovery-btn:active {
+  transform: scale(0.9);
+}
+
+.photo-recovery-btn svg {
+  filter: drop-shadow(0 2px 4px rgba(0, 149, 246, 0.1));
+}
+
+.post-image {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #f0f2f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.post-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Fix for browser default broken image icon */
+.post-image img:not([src]), 
+.post-image img[src=""] {
+  visibility: hidden;
+}
+
+/* Spinner mini */
+.spinner-mini {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(0, 149, 246, 0.1);
+  border-top-color: #0095f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Marker Label Fix */
+.map-marker-label {
+  font-weight: 800;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
