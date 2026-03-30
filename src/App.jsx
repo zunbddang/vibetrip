@@ -777,7 +777,8 @@ const App = () => {
         setTripSpots(prev => prev.map(s => String(s.id) === spotIdStr ? updatedSpot : s));
         setBrokenImages(prev => prev.filter(id => String(id) !== spotIdStr));
         
-        if (permUrl && !isReadOnly) {
+        // CRITICAL FIX: Always sync to DB even if permUrl is null (saves newTempUrl)
+        if (!isReadOnly) {
           await syncSpot(updatedSpot);
         }
         return true;
