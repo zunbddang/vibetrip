@@ -102,6 +102,21 @@ const getDayColor = (day) => {
   return DAY_COLORS[(day - 1) % DAY_COLORS.length];
 };
 
+const getOptimizedUrl = (url, type = 'thumb') => {
+  if (!url || !url.includes('supabase.co')) return url;
+  
+  // Apply Supabase Image Transformation for public storage URLs
+  if (url.includes('/storage/v1/object/public/')) {
+    const width = type === 'thumb' ? 400 : 1200;
+    const quality = type === 'thumb' ? 70 : 85;
+    
+    // Transform object/public to render/image/public and append params
+    return url.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/') 
+      + (url.includes('?') ? '&' : '?') + `width=${width}&quality=${quality}&resize=contain`;
+  }
+  return url;
+};
+
 const getDistanceString = (dist) => {
   if (!dist) return null;
   if (dist < 1000) return `${Math.round(dist)}m`;
@@ -878,47 +893,50 @@ const App = () => {
   });
 
   const onMapSearchLoad = (autocomplete) => { mapSearchRef.current = autocomplete; };
-  const onMapPlaceChanged = () => {
+  const onMapPlaceChanged = useCallback(() => {
     if (mapSearchRef.current !== null) {
       const place = mapSearchRef.current.getPlace();
       if (place?.geometry) {
-        let photoUrl = null;
+        const tempId = 'temp-' + Date.now();
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        
+        let initialPhotoUrl = null;
         if (place.photos && place.photos.length > 0) {
           try {
-            const tempUrl = place.photos[0].getUrl({ maxWidth: 600, maxHeight: 600 });
-            console.log('📸 Google Place Photo URL:', tempUrl);
+            initialPhotoUrl = place.photos[0].getUrl({ maxWidth: 600, maxHeight: 600 });
             
-            // Try to make it permanent immediately
-            uploadRemoteImage(tempUrl).then(permUrl => {
+            // Background permanent upload
+            uploadRemoteImage(initialPhotoUrl).then(permUrl => {
                if (permUrl) {
                   setSelectedSpot(prev => (prev && prev.id === tempId) ? { ...prev, photoUrl: permUrl } : prev);
                   setSearchedPlace(prev => (prev && prev.id === tempId) ? { ...prev, photoUrl: permUrl } : prev);
                }
             });
-            
-            photoUrl = tempUrl; // Set temp first for immediate UI
           } catch (err) {
-            console.error('❌ getUrl() failed:', err);
+            console.error('📸 Google Place Photo error:', err);
           }
         }
-        const tempId = 'temp-' + Date.now();
+
         const newPlace = {
           id: tempId,
-          name: place.name, // Will be localized (Korean)
-          lat: place.geometry.location.lat(),
-          lng: place.geometry.location.lng(),
+          name: place.name,
+          lat,
+          lng,
           type: "itinerary",
           memo: place.formatted_address,
-          photoUrl: photoUrl,
+          photoUrl: initialPhotoUrl,
           placeId: place.place_id,
           day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
           date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0],
           orderIndex: tripSpots.length
         };
+
+        // Group initial state updates
         setSearchedPlace(newPlace);
         setSelectedSpot(newPlace);
 
-        // Fetch English name in background to enrichment search result
+        // Background Enrichment: Dual-language geocoding
         if (place.place_id && window.google && window.google.maps) {
           const geocoder = new window.google.maps.Geocoder();
           geocoder.geocode({ placeId: place.place_id, language: 'en' }, (resultsEn, statusEn) => {
@@ -926,48 +944,40 @@ const App = () => {
               const enResult = resultsEn.find(r => r.types.includes('point_of_interest') || r.types.includes('establishment')) || resultsEn[0];
               const enPoi = enResult.address_components.find(c =>
                 c.types.includes("point_of_interest") || c.types.includes("establishment") ||
-                c.types.includes("premise") || c.types.includes("natural_feature") ||
-                c.types.includes("park") || c.types.includes("airport")
+                c.types.includes("premise") || c.types.includes("natural_feature")
               );
               const enName = enPoi ? enPoi.long_name : enResult.formatted_address.split(',')[0].trim();
 
               if (enName && enName !== place.name) {
                 const dualName = `${place.name} (${enName})`;
-                setSelectedSpot(prev => {
-                  if (prev && prev.id === tempId) return { ...prev, name: dualName };
-                  return prev;
-                });
-                setSearchedPlace(prev => {
-                  if (prev && prev.id === tempId) return { ...prev, name: dualName };
-                  return prev;
-                });
+                setSelectedSpot(prev => (prev && prev.id === tempId) ? { ...prev, name: dualName } : prev);
+                setSearchedPlace(prev => (prev && prev.id === tempId) ? { ...prev, name: dualName } : prev);
               }
             }
           });
         }
 
-        const newPos = { lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
+        const newPos = { lat, lng };
         if (place.geometry.viewport) {
           map?.fitBounds(place.geometry.viewport);
-          setMapCenter(newPos);
         } else {
           map?.panTo(newPos);
-          setMapCenter(newPos);
           setMapZoom(15);
         }
+        setMapCenter(newPos);
       }
     }
-  };
+  }, [map, tripSpots, uploadRemoteImage]);
 
-  const onMapClick = (e) => {
+  const onMapClick = useCallback((e) => {
     if (isReadOnly) return;
 
-    // If user clicked on a POI (Place of Interest)
     if (e.placeId) {
-      if (e.stop) e.stop(); // Prevent default Google Maps InfoWindow
-
+      if (e.stop) e.stop();
       const tempId = 'temp-' + Date.now();
-      setSelectedSpot({
+      
+      // Step 1: Immediate loading state
+      const initialSpot = {
         id: tempId,
         name: "장소 정보 불러오는 중...",
         lat: e.latLng.lat(),
@@ -977,132 +987,93 @@ const App = () => {
         day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
         date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0],
         orderIndex: tripSpots.length
+      };
+      setSelectedSpot(initialSpot);
+
+      // Step 2: Background processing
+      const service = new window.google.maps.places.PlacesService(map);
+      
+      const fetchDetails = (lang) => new Promise(r => {
+        service.getDetails({ placeId: e.placeId, language: lang }, (place, status) => {
+          if (status === window.google.maps.places.PlacesServiceStatus.OK) r(place);
+          else r(null);
+        });
       });
 
-      const service = new window.google.maps.places.PlacesService(map);
-      service.getDetails({ placeId: e.placeId, language: 'ko' }, (place, status) => {
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && place) {
-          // Fetch English name too
-          service.getDetails({ placeId: e.placeId, language: 'en' }, (placeEn, statusEn) => {
-            let finalName = place.name;
-            if (statusEn === "OK" && placeEn && placeEn.name !== place.name) {
-              finalName = `${place.name} (${placeEn.name})`;
-            }
+      Promise.all([fetchDetails('ko'), fetchDetails('en')]).then(async ([placeKo, placeEn]) => {
+        if (!placeKo) return;
+        
+        let finalName = placeKo.name;
+        if (placeEn && placeEn.name !== placeKo.name) {
+          finalName = `${placeKo.name} (${placeEn.name})`;
+        }
 
-            let photoUrl = null;
-            if (place.photos && place.photos.length > 0) {
-              try {
-                const tempUrl = place.photos[0].getUrl({ maxWidth: 600, maxHeight: 600 });
-                console.log('📸 Google Place Photo URL (POI):', tempUrl);
-                
-                // Make it permanent
-                uploadRemoteImage(tempUrl).then(permUrl => {
-                  if (permUrl) {
-                    setSelectedSpot(prev => (prev && prev.id === tempId) ? { ...prev, photoUrl: permUrl } : prev);
-                  }
-                });
-
-                photoUrl = tempUrl;
-              } catch (err) {
-                console.error('❌ POI getUrl() failed:', err);
-              }
-            }
-
-            setSelectedSpot(prev => {
-              if (prev && prev.id === tempId) {
-                return {
-                  ...prev,
-                  name: finalName,
-                  memo: place.formatted_address,
-                  photoUrl: photoUrl,
-                  placeId: place.place_id,
-                  lat: place.geometry.location.lat(),
-                  lng: place.geometry.location.lng(),
-                  rating: place.rating,
-                  reviews: place.user_ratings_total,
-                  phone: place.formatted_phone_number,
-                  openingHours: place.opening_hours?.weekday_text
-                };
-              }
-              return prev;
-            });
+        let photoUrl = null;
+        if (placeKo.photos?.[0]) {
+          photoUrl = placeKo.photos[0].getUrl({ maxWidth: 600, maxHeight: 600 });
+          // Async permanent copy
+          uploadRemoteImage(photoUrl).then(permUrl => {
+            if (permUrl) setSelectedSpot(prev => (prev && prev.id === tempId) ? { ...prev, photoUrl: permUrl } : prev);
           });
         }
+
+        setSelectedSpot(prev => (prev && prev.id === tempId) ? {
+          ...prev,
+          name: finalName,
+          memo: placeKo.formatted_address,
+          photoUrl: photoUrl,
+          placeId: placeKo.place_id,
+          rating: placeKo.rating,
+          reviews: placeKo.user_ratings_total,
+          phone: placeKo.formatted_phone_number,
+          openingHours: placeKo.opening_hours?.weekday_text
+        } : prev);
       });
       return;
     }
 
     const lat = e.latLng.lat();
     const lng = e.latLng.lng();
-
     const tempId = 'temp-' + Date.now();
-    const tempSpot = {
+    
+    // Group updates for manual coordinate click
+    setSelectedSpot({
       id: tempId,
       name: "장소 확인 중...",
       lat,
       lng,
       type: "itinerary",
       memo: "위치 정보를 불러오는 중입니다...",
-      day: tripSpots.filter(s => !selectedDay || String(s.day) === String(selectedDay)).length > 0 
-           ? tripSpots.filter(s => !selectedDay || String(s.day) === String(selectedDay)).slice(-1)[0].day 
-           : (selectedDay || 1),
-      date: tripSpots.filter(s => !selectedDay || String(s.day) === String(selectedDay)).length > 0 
-           ? tripSpots.filter(s => !selectedDay || String(s.day) === String(selectedDay)).slice(-1)[0].date 
-           : new Date().toISOString().split('T')[0],
+      day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
+      date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0],
       orderIndex: tripSpots.length
-    };
-
-    setSelectedSpot(tempSpot);
+    });
     setSearchedPlace(null);
 
-    // Dual-language Reverse Geocoding for coordinates
     if (window.google && window.google.maps) {
       const geocoder = new window.google.maps.Geocoder();
-
-      const fetchName = (lang) => new Promise((resolve) => {
+      const fetchAddr = (lang) => new Promise(r => {
         geocoder.geocode({ location: { lat, lng }, language: lang }, (results, status) => {
-          if (status === "OK" && results && results.length > 0) {
+          if (status === "OK" && results?.[0]) {
             const result = results.find(r => r.types.includes('point_of_interest') || r.types.includes('establishment')) || results[0];
-            let name = "";
             const poi = result.address_components.find(c =>
               c.types.includes("point_of_interest") || c.types.includes("establishment") ||
-              c.types.includes("premise") || c.types.includes("natural_feature") ||
-              c.types.includes("park") || c.types.includes("airport")
+              c.types.includes("premise") || c.types.includes("natural_feature")
             );
-            name = poi ? poi.long_name : result.formatted_address.split(',')[0].trim();
-            resolve({ name, address: result.formatted_address });
-          } else {
-            resolve(null);
-          }
+            r({ name: poi ? poi.long_name : result.formatted_address.split(',')[0].trim(), address: result.formatted_address });
+          } else r(null);
         });
       });
 
-      Promise.all([fetchName('ko'), fetchName('en')]).then(([koRes, enRes]) => {
-        let finalName = "지도상 지점";
-        let finalMemo = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-
-        if (koRes) {
-          finalName = koRes.name;
-          finalMemo = koRes.address;
-          if (enRes && enRes.name && enRes.name !== koRes.name) {
-            // Check if names are actually different (not just same name in different script if possible, 
-            // but usually this is what "병기" means)
-            finalName = `${koRes.name} (${enRes.name})`;
-          }
-        } else if (enRes) {
-          finalName = enRes.name;
-          finalMemo = enRes.address;
-        }
-
-        setSelectedSpot(prev => {
-          if (prev && prev.id === tempId) {
-            return { ...prev, name: finalName, memo: finalMemo };
-          }
-          return prev;
-        });
+      Promise.all([fetchAddr('ko'), fetchAddr('en')]).then(([ko, en]) => {
+        if (!ko) return;
+        let finalName = ko.name;
+        if (en && en.name && en.name !== ko.name) finalName = `${ko.name} (${en.name})`;
+        
+        setSelectedSpot(prev => (prev && prev.id === tempId) ? { ...prev, name: finalName, memo: ko.address } : prev);
       });
     }
-  };
+  }, [map, tripSpots, isReadOnly, uploadRemoteImage]);
 
   const handleUpdateSpot = (id, field, value) => {
     const target = tripSpots.find(s => String(s.id) === String(id));
@@ -1353,43 +1324,104 @@ const App = () => {
     setSession(null);
   };
 
-  const handleDownloadPhoto = async (url, filename) => {
+  const handleDownloadPhoto = async (url, filename, isSilent = false) => {
+    if (!url) return;
     try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const file = new File([blob], filename || 'vibe-trip-photo.jpg', { type: blob.type });
+      if (!isSilent) setIsLoading(true);
+      
+      // 1. Try to fetch the blob (allows proper sharing and custom save dialogs)
+      let blob;
+      try {
+        const response = await fetch(url, { mode: 'cors' });
+        if (!response.ok) throw new Error(`HTTP status ${response.status}`);
+        blob = await response.blob();
+      } catch (fetchErr) {
+        console.warn('📸 Fetch failed (likely CORS), using optimized fallback:', fetchErr);
+        
+        // Supabase specific optimization
+        if (url.includes('supabase.co')) {
+          const downloadUrl = `${url}${url.includes('?') ? '&' : '?'}download=`;
+          if (isSilent) {
+             const link = document.createElement('a');
+             link.href = downloadUrl;
+             link.style.display = 'none';
+             document.body.appendChild(link);
+             link.click();
+             setTimeout(() => document.body.removeChild(link), 100);
+          } else {
+             window.location.assign(downloadUrl);
+          }
+          return;
+        }
+        
+        const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (!isSilent) {
+          if (isMobileDevice) {
+            alert('이미지를 자동으로 저장할 수 없습니다.\n새 창에서 이미지를 길게 눌러 "사진 앱에 저장"을 선택해 주세요.');
+          } else {
+            alert('보안 정책으로 인해 직접 저장이 제한되었습니다.\n새 창에서 이미지를 우클릭하여 저장해 주세요.');
+          }
+          window.open(url, '_blank');
+        }
+        return;
+      }
 
-      // If Web Share API is available (iOS/Android)
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      const ext = url.split('.').pop().split(/[?#]/)[0] || 'jpg';
+      const finalFilename = filename || `vibe-trip-photo.${ext}`;
+      const file = new File([blob], finalFilename, { type: blob.type });
+
+      // Detect Platform
+      const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      // 2. PC: Folder Selection (File System Access API)
+      if (!isMobileDevice && window.showSaveFilePicker) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: finalFilename,
+            types: [{
+              description: 'Image File',
+              accept: { [blob.type]: [`.${ext}`] },
+            }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          return;
+        } catch (pickerErr) {
+          if (pickerErr.name === 'AbortError') return; // User cancelled
+          console.warn('Save picker failed, falling back to legacy download:', pickerErr);
+        }
+      }
+
+      // 3. Mobile: Gallery Save (Native Share Sheet)
+      if (isMobileDevice && navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
           await navigator.share({
             files: [file],
             title: '사진 저장',
-            text: '여행 사진을 저장합니다.'
+            text: '여행 사진을 갤러리에 저장합니다.'
           });
-          return; // Success
+          return;
         } catch (shareErr) {
-          if (shareErr.name !== 'AbortError') {
-            console.error('Share failed, falling back to traditional download:', shareErr);
-          } else {
-            return; // User cancelled
-          }
+          if (shareErr.name === 'AbortError') return;
+          console.warn('Native share failed, using fallback link:', shareErr);
         }
       }
 
-      // Fallback: Traditional download for Desktop
+      // 4. Legacy/Fallback Download
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = filename || 'vibe-trip-photo.jpg';
+      link.download = finalFilename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(blobUrl);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 200);
     } catch (err) {
-      console.error('Download failed:', err);
-      // Last resort: Open in new tab
-      window.open(url, '_blank');
+      console.error('❌ Download process failed:', err);
+      if (!isSilent) window.open(url, '_blank');
+    } finally {
+      if (!isSilent) setIsLoading(false);
     }
   };
   
@@ -1442,58 +1474,68 @@ const App = () => {
 
   const handleBatchDownload = async () => {
     if (selectedPhotos.length === 0) return;
-    setIsLoading(true);
     
-    try {
-      const fetchBlob = async (photoId) => {
-        const photo = tripPhotos.find(p => p.id === photoId);
-        if (photo?.url) {
-          const response = await fetch(photo.url);
-          const blob = await response.blob();
-          return new File([blob], `trip-photo-${photoId}.jpg`, { type: blob.type });
-        }
-        return null;
-      };
-
-      const files = (await Promise.all(selectedPhotos.map(id => fetchBlob(id)))).filter(f => f !== null);
-
-      // If Web Share API supports file sharing (Batch)
-      if (navigator.canShare && navigator.canShare({ files })) {
-        try {
-          await navigator.share({
-            files,
-            title: '사진 묶음 저장',
-            text: `${files.length}개의 여행 사진을 저장합니다.`
-          });
-          setSelectedPhotos([]);
-          setIsLoading(false);
-          return;
-        } catch (shareErr) {
-          if (shareErr.name === 'AbortError') {
-             setIsLoading(false);
-             return; // User cancelled
+    // Check if on mobile for possible batch sharing
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    
+    if (isMobile && navigator.canShare) {
+      setIsLoading(true);
+      try {
+        const filePromises = selectedPhotos.map(async (id) => {
+          const photo = tripPhotos.find(p => p.id === id);
+          if (!photo?.url) return null;
+          try {
+            const resp = await fetch(photo.url);
+            const blob = await resp.blob();
+            return new File([blob], `trip-photo-${photo.id}.jpg`, { type: blob.type });
+          } catch (e) { return null; }
+        });
+        
+        const files = (await Promise.all(filePromises)).filter(f => f !== null);
+        if (files.length > 0 && navigator.canShare({ files })) {
+          try {
+            await navigator.share({
+              files,
+              title: '사진 묶음 저장',
+              text: `${files.length}개의 여행 사진을 저장합니다.`
+            });
+            setSelectedPhotos([]);
+            return;
+          } catch (e) {
+            if (e.name === 'AbortError') return;
+            console.warn('Batch share failed, falling back to sequential.');
           }
-          console.warn('Batch share failed, falling back to individual download:', shareErr);
         }
+      } catch (err) {
+        console.error('Batch share preparation failed:', err);
+      } finally {
+        setIsLoading(false);
       }
+    }
 
-      // Fallback for Desktop: Individual download loop
-      for (let i = 0; i < files.length; i++) {
-        const blobUrl = URL.createObjectURL(files[i]);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = files[i].name;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(blobUrl);
-        await new Promise(r => setTimeout(r, 300));
+    // Sequential download loop for Desktop (or Mobile fallback)
+    setIsLoading(true);
+    let count = 0;
+    try {
+      for (let i = 0; i < selectedPhotos.length; i++) {
+        const photo = tripPhotos.find(p => p.id === selectedPhotos[i]);
+        if (photo?.url) {
+          await handleDownloadPhoto(photo.url, `vibe-trip-${photo.id}.jpg`, true);
+          count++;
+          // Stagger to prevent browser from blocking multiple popups/downloads
+          await new Promise(r => setTimeout(r, 800));
+        }
       }
       
-      alert(`${files.length}개의 사진 다운로드가 시작되었습니다.`);
+      if (count > 0 && !isMobile) {
+        const hasPicker = !!window.showSaveFilePicker;
+        const msg = hasPicker 
+          ? `${count}개의 사진 저장을 시작합니다.\n각 사진마다 저장 폴더를 선택하는 창이 뜹니다.` 
+          : `${count}개의 사진 다운로드 요청을 완료했습니다.\n브라우저 상단에서 '여러 파일 다운로드 허용' 메시지가 뜨면 꼭 [허용]을 눌러주세요! 📥`;
+        alert(msg);
+      }
     } catch (err) {
-      console.error('Batch download failed:', err);
-      alert('일괄 다운로드 중 오류가 발생했습니다.');
+      console.error('Batch loop failed:', err);
     } finally {
       setIsLoading(false);
       setSelectedPhotos([]);
@@ -1846,8 +1888,9 @@ const App = () => {
                             />
                           ) : (
                             <img 
-                              src={spot.photoUrl || spot.photo_url} 
+                              src={getOptimizedUrl(spot.photoUrl || spot.photo_url, 'thumb')} 
                               alt={spot.name} 
+                              loading="lazy"
                               onError={() => {
                                 setBrokenImages(prev => [...new Set([...prev, String(spot.id)])]);
                               }}
@@ -2152,9 +2195,10 @@ const App = () => {
                             />
                           ) : (
                             <img 
-                              src={selectedSpot.photoUrl || selectedSpot.photo_url} 
+                              src={getOptimizedUrl(selectedSpot.photoUrl || selectedSpot.photo_url, 'thumb')} 
                               alt={selectedSpot.name} 
                               className={`drawer-photo ${isUploadingPhoto || refreshingImages.includes(String(selectedSpot.id)) ? 'uploading' : ''}`} 
+                              loading="lazy"
                               onError={() => {
                                 setBrokenImages(prev => [...new Set([...prev, String(selectedSpot.id)])]);
                               }}
@@ -2469,10 +2513,17 @@ const App = () => {
                 <div className="gallery-selection-bar">
                   <button className="selection-control-btn" onClick={handleSelectAll}>전체 선택</button>
                   <button className="selection-control-btn" onClick={handleDeselectAll}>선택 해제</button>
-                  {selectedPhotos.length > 0 && !isReadOnly && (
-                    <button className="delete-action-btn" onClick={handleDeleteSelected}>
-                      <Trash2 size={14} /> {selectedPhotos.length}개 삭제
-                    </button>
+                  {selectedPhotos.length > 0 && (
+                    <>
+                      <button className="download-action-btn" onClick={handleBatchDownload} disabled={isLoading}>
+                        <Download size={14} /> {selectedPhotos.length}개 다운로드
+                      </button>
+                      {!isReadOnly && (
+                        <button className="delete-action-btn" onClick={handleDeleteSelected}>
+                          <Trash2 size={14} /> {selectedPhotos.length}개 삭제
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -2543,8 +2594,9 @@ const App = () => {
                               </>
                             ) : (
                               <img 
-                                src={photo.url} 
+                                src={getOptimizedUrl(photo.url, 'thumb')} 
                                 alt="Trip memory" 
+                                loading="lazy"
                                 onError={(e) => {
                                   e.target.style.display = 'none';
                                   setTripPhotos(prev => prev.filter(p => p.id !== photo.id));
@@ -2712,7 +2764,7 @@ const App = () => {
                 className="lightbox-main-video"
               />
             ) : (
-              <img src={tripPhotos[lightboxIndex].url} alt="Lightbox view" className="lightbox-main-img" />
+              <img src={getOptimizedUrl(tripPhotos[lightboxIndex].url, 'large')} alt="Lightbox view" className="lightbox-main-img" />
             )}
             
             <button className="lightbox-nav-btn prev" onClick={() => setLightboxIndex((lightboxIndex - 1 + tripPhotos.length) % tripPhotos.length)}>

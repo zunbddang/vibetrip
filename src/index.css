@@ -1827,24 +1827,48 @@ body {
   text-decoration: underline;
 }
 
-.delete-action-btn {
-  background: #ffeded;
-  color: #ed4956;
-  border: 1px solid #ffccd0;
-  padding: 4px 12px;
-  border-radius: 6px;
+.delete-action-btn, .download-action-btn {
+  background: #f8f9fa;
+  border: 1px solid #dbdbdb;
+  color: #262626;
+  padding: 6px 14px;
+  border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.download-action-btn {
+  background: #f0f7ff;
+  border-color: #3897f0;
+  color: #3897f0;
+}
+
+.download-action-btn:hover {
+  background: #3897f0;
+  color: white;
+  box-shadow: 0 4px 12px rgba(56, 151, 240, 0.2);
+}
+
+.delete-action-btn {
+  background: #fff5f5;
+  border-color: #ffccd0;
+  color: #ed4956;
 }
 
 .delete-action-btn:hover {
   background: #ed4956;
   color: white;
+  box-shadow: 0 4px 12px rgba(237, 73, 86, 0.2);
+}
+
+.download-action-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 /* Timeline Navigation Strip */
