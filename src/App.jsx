@@ -319,6 +319,7 @@ const App = () => {
   const [lightboxIndex, setLightboxIndex] = useState(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(null); // { current, total, status }
+  const isDownloadCancelled = useRef(false);
   const mapSearchRef = useRef(null);
 
   // Handle URL Sharing
@@ -1488,6 +1489,8 @@ const App = () => {
     // Detect Platform
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     
+    isDownloadCancelled.current = false;
+    
     // 1. Mobile Batch Sharing (Most reliable for Gallery on Android/iOS)
     if (isMobile && navigator.share) {
       const BATCH_SIZE = 10;
@@ -1498,6 +1501,8 @@ const App = () => {
       
       try {
         for (let i = 0; i < chunks.length; i++) {
+          if (isDownloadCancelled.current) break;
+          
           setDownloadProgress({ 
             current: i * BATCH_SIZE, 
             total, 
@@ -1559,6 +1564,8 @@ const App = () => {
     try {
       let count = 0;
       for (let i = 0; i < selectedPhotos.length; i++) {
+        if (isDownloadCancelled.current) break;
+        
         const photo = tripPhotos.find(p => p.id === selectedPhotos[i]);
         if (photo?.url) {
           setDownloadProgress({ 
@@ -1879,12 +1886,23 @@ const App = () => {
             <div className="spinner"></div>
             <span>{downloadProgress ? downloadProgress.status : '불러오는 중...'}</span>
             {downloadProgress && (
-              <div className="download-progress-bar-container">
-                <div 
-                  className="download-progress-bar-fill" 
-                  style={{ width: `${(downloadProgress.current / downloadProgress.total) * 100}%` }}
-                ></div>
-              </div>
+              <>
+                <div className="download-progress-bar-container">
+                  <div 
+                    className="download-progress-bar-fill" 
+                    style={{ width: `${(downloadProgress.current / downloadProgress.total) * 100}%` }}
+                  ></div>
+                </div>
+                <button 
+                  className="download-cancel-btn"
+                  onClick={() => {
+                    isDownloadCancelled.current = true;
+                    setDownloadProgress(prev => ({ ...prev, status: '중단하는 중...' }));
+                  }}
+                >
+                  다운로드 중지
+                </button>
+              </>
             )}
           </div>
         )}
