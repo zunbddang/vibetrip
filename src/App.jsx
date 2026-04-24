@@ -318,6 +318,7 @@ const App = () => {
   const [userLocation, setUserLocation] = useState(null);
   const [lightboxIndex, setLightboxIndex] = useState(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(null); // { current, total, status }
   const mapSearchRef = useRef(null);
 
   // Handle URL Sharing
@@ -1327,7 +1328,10 @@ const App = () => {
   const handleDownloadPhoto = async (url, filename, isSilent = false) => {
     if (!url) return;
     try {
-      if (!isSilent) setIsLoading(true);
+      if (!isSilent) {
+        setIsLoading(true);
+        setDownloadProgress({ current: 0, total: 1, status: '사진 다운로드 준비 중...' });
+      }
       
       // 1. Try to fetch the blob (allows proper sharing and custom save dialogs)
       let blob;
@@ -1340,7 +1344,7 @@ const App = () => {
         
         // Supabase specific optimization
         if (url.includes('supabase.co')) {
-          const downloadUrl = `${url}${url.includes('?') ? '&' : '?'}download=`;
+          const downloadUrl = `${url}${url.includes('?') ? '&' : '?'}download=${filename || 'vibe-trip-photo.jpg'}`;
           if (isSilent) {
              const link = document.createElement('a');
              link.href = downloadUrl;
@@ -1349,6 +1353,7 @@ const App = () => {
              link.click();
              setTimeout(() => document.body.removeChild(link), 100);
           } else {
+             // For Android Chrome, this is often the most reliable way to trigger a "real" download
              window.location.assign(downloadUrl);
           }
           return;
@@ -1373,7 +1378,22 @@ const App = () => {
       // Detect Platform
       const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-      // 2. PC: Folder Selection (File System Access API)
+      // 2. Mobile: Gallery Save (Native Share Sheet) - Highest Priority for Mobile
+      if (isMobileDevice && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: '사진 저장',
+            text: '여행 사진을 갤러리에 저장합니다.'
+          });
+          return;
+        } catch (shareErr) {
+          if (shareErr.name === 'AbortError') return;
+          console.warn('Native share failed, using fallback:', shareErr);
+        }
+      }
+
+      // 3. PC: Folder Selection (File System Access API)
       if (!isMobileDevice && window.showSaveFilePicker) {
         try {
           const handle = await window.showSaveFilePicker({
@@ -1393,21 +1413,6 @@ const App = () => {
         }
       }
 
-      // 3. Mobile: Gallery Save (Native Share Sheet)
-      if (isMobileDevice && navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: '사진 저장',
-            text: '여행 사진을 갤러리에 저장합니다.'
-          });
-          return;
-        } catch (shareErr) {
-          if (shareErr.name === 'AbortError') return;
-          console.warn('Native share failed, using fallback link:', shareErr);
-        }
-      }
-
       // 4. Legacy/Fallback Download
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -1421,7 +1426,10 @@ const App = () => {
       console.error('❌ Download process failed:', err);
       if (!isSilent) window.open(url, '_blank');
     } finally {
-      if (!isSilent) setIsLoading(false);
+      if (!isSilent) {
+        setIsLoading(false);
+        setDownloadProgress(null);
+      }
     }
   };
   
@@ -1474,70 +1482,111 @@ const App = () => {
 
   const handleBatchDownload = async () => {
     if (selectedPhotos.length === 0) return;
+    const total = selectedPhotos.length;
+    setIsLoading(true);
     
-    // Check if on mobile for possible batch sharing
+    // Detect Platform
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     
-    if (isMobile && navigator.canShare) {
-      setIsLoading(true);
+    // 1. Mobile Batch Sharing (Most reliable for Gallery on Android/iOS)
+    if (isMobile && navigator.share) {
+      const BATCH_SIZE = 10;
+      const chunks = [];
+      for (let i = 0; i < selectedPhotos.length; i += BATCH_SIZE) {
+        chunks.push(selectedPhotos.slice(i, i + BATCH_SIZE));
+      }
+      
       try {
-        const filePromises = selectedPhotos.map(async (id) => {
-          const photo = tripPhotos.find(p => p.id === id);
-          if (!photo?.url) return null;
-          try {
-            const resp = await fetch(photo.url);
-            const blob = await resp.blob();
-            return new File([blob], `trip-photo-${photo.id}.jpg`, { type: blob.type });
-          } catch (e) { return null; }
-        });
-        
-        const files = (await Promise.all(filePromises)).filter(f => f !== null);
-        if (files.length > 0 && navigator.canShare({ files })) {
-          try {
-            await navigator.share({
-              files,
-              title: '사진 묶음 저장',
-              text: `${files.length}개의 여행 사진을 저장합니다.`
+        for (let i = 0; i < chunks.length; i++) {
+          setDownloadProgress({ 
+            current: i * BATCH_SIZE, 
+            total, 
+            status: `${i + 1}/${chunks.length}번째 묶음 사진 준비 중...` 
+          });
+          
+          const chunk = chunks[i];
+          const filePromises = chunk.map(async (id) => {
+            const photo = tripPhotos.find(p => p.id === id);
+            if (!photo?.url) return null;
+            try {
+              const resp = await fetch(photo.url);
+              if (!resp.ok) return null;
+              const blob = await resp.blob();
+              const ext = photo.url.split('.').pop().split(/[?#]/)[0] || 'jpg';
+              return new File([blob], `vibe-${id}.${ext}`, { type: blob.type });
+            } catch (e) { return null; }
+          });
+          
+          const files = (await Promise.all(filePromises)).filter(f => f !== null);
+          
+          if (files.length > 0) {
+            setDownloadProgress({ 
+              current: Math.min((i + 1) * BATCH_SIZE, total), 
+              total, 
+              status: `준비 완료! 공유창에서 '기기에 저장' 또는 '갤러리'를 선택해주세요. (${i + 1}/${chunks.length})` 
             });
-            setSelectedPhotos([]);
-            return;
-          } catch (e) {
-            if (e.name === 'AbortError') return;
-            console.warn('Batch share failed, falling back to sequential.');
+            
+            try {
+              await navigator.share({
+                files,
+                title: `VibeTrip 사진 (${i + 1}/${chunks.length})`,
+                text: `${files.length}개의 소중한 추억을 저장합니다.`
+              });
+            } catch (e) {
+              if (e.name === 'AbortError') {
+                if (i < chunks.length - 1 && !confirm('다음 묶음도 계속 저장하시겠습니까?')) break;
+                continue; 
+              }
+              throw e;
+            }
+            
+            // Wait a bit to ensure system handles the share intent before next chunk
+            await new Promise(r => setTimeout(r, 1200));
           }
         }
+        setSelectedPhotos([]);
       } catch (err) {
-        console.error('Batch share preparation failed:', err);
+        console.error('Batch share failed:', err);
+        alert('공유 도중 오류가 발생했습니다. 브라우저 설정을 확인해주세요.');
       } finally {
         setIsLoading(false);
+        setDownloadProgress(null);
       }
+      return;
     }
 
-    // Sequential download loop for Desktop (or Mobile fallback)
-    setIsLoading(true);
-    let count = 0;
+    // 2. Sequential Fallback (Desktop or Share Unavailable)
     try {
+      let count = 0;
       for (let i = 0; i < selectedPhotos.length; i++) {
         const photo = tripPhotos.find(p => p.id === selectedPhotos[i]);
         if (photo?.url) {
+          setDownloadProgress({ 
+            current: i, 
+            total, 
+            status: `${i + 1}/${total} 사진 다운로드 중...` 
+          });
+          
           await handleDownloadPhoto(photo.url, `vibe-trip-${photo.id}.jpg`, true);
           count++;
-          // Stagger to prevent browser from blocking multiple popups/downloads
-          await new Promise(r => setTimeout(r, 800));
+          
+          // Longer stagger for sequential downloads to prevent browser blocking
+          await new Promise(r => setTimeout(r, 1500));
         }
       }
       
       if (count > 0 && !isMobile) {
         const hasPicker = !!window.showSaveFilePicker;
         const msg = hasPicker 
-          ? `${count}개의 사진 저장을 시작합니다.\n각 사진마다 저장 폴더를 선택하는 창이 뜹니다.` 
-          : `${count}개의 사진 다운로드 요청을 완료했습니다.\n브라우저 상단에서 '여러 파일 다운로드 허용' 메시지가 뜨면 꼭 [허용]을 눌러주세요! 📥`;
+          ? `${count}개의 사진 저장을 완료했습니다.` 
+          : `${count}개의 사진 다운로드를 요청했습니다.\n브라우저에서 '여러 파일 다운로드 허용'을 꼭 눌러주세요! 📥`;
         alert(msg);
       }
     } catch (err) {
       console.error('Batch loop failed:', err);
     } finally {
       setIsLoading(false);
+      setDownloadProgress(null);
       setSelectedPhotos([]);
     }
   };
@@ -1825,7 +1874,20 @@ const App = () => {
       </header>
 
       <main style={{ flex: 1, overflowY: activeTab === 'map' ? 'hidden' : 'auto', position: 'relative' }}>
-        {isLoading && <div className="loading-overlay"><div className="spinner"></div><span>불러오는 중...</span></div>}
+        {isLoading && (
+          <div className="loading-overlay">
+            <div className="spinner"></div>
+            <span>{downloadProgress ? downloadProgress.status : '불러오는 중...'}</span>
+            {downloadProgress && (
+              <div className="download-progress-bar-container">
+                <div 
+                  className="download-progress-bar-fill" 
+                  style={{ width: `${(downloadProgress.current / downloadProgress.total) * 100}%` }}
+                ></div>
+              </div>
+            )}
+          </div>
+        )}
 
         {currentTrip && tripSpots.length > 0 && activeTab !== 'gallery' && (
           <div className={`day-selector-container ${activeTab === 'map' ? 'floating-map-days' : ''}`}>
