@@ -754,10 +754,10 @@ const App = () => {
   };
 
   useEffect(() => {
-    if (selectedSpot && !String(selectedSpot.id).startsWith('temp-')) {
+    if (selectedSpot) {
       setFormInput({
         day: selectedSpot.day || 1,
-        date: selectedSpot.date || new Date().toISOString().split('T')[0],
+        date: selectedSpot.date || getCorrectDateForDay(selectedSpot.day || 1),
         type: selectedSpot.type || 'itinerary',
         memo: selectedSpot.memo || '',
         rating: selectedSpot.rating || null,
@@ -766,7 +766,7 @@ const App = () => {
         openingHours: selectedSpot.openingHours || null
       });
     }
-  }, [selectedSpot]);
+  }, [selectedSpot?.id]); // Only reset form when the selection actually changes to a different spot
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -936,6 +936,15 @@ const App = () => {
           }
         }
 
+        // Determine the target day: prioritize selectedDay, then last spot's day, then default to 1
+        const targetDay = selectedDay !== null ? Number(selectedDay) : 
+                         (tripSpots.length > 0 ? Number(tripSpots[tripSpots.length - 1].day) : 1);
+        const targetDate = getCorrectDateForDay(targetDay);
+        
+        // Find the next order index for this day
+        const daySpots = tripSpots.filter(s => Number(s.day) === targetDay);
+        const nextOrderIndex = daySpots.length > 0 ? Math.max(...daySpots.map(s => Number(s.orderIndex) || 0)) + 1 : 0;
+
         const newPlace = {
           id: tempId,
           name: place.name,
@@ -945,9 +954,9 @@ const App = () => {
           memo: place.formatted_address,
           photoUrl: initialPhotoUrl,
           placeId: place.place_id,
-          day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
-          date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0],
-          orderIndex: tripSpots.length
+          day: targetDay,
+          date: targetDate,
+          orderIndex: nextOrderIndex
         };
 
         // Group initial state updates
@@ -1054,6 +1063,15 @@ const App = () => {
     const lng = e.latLng.lng();
     const tempId = 'temp-' + Date.now();
     
+    // Determine the target day: prioritize selectedDay, then last spot's day, then default to 1
+    const targetDay = selectedDay !== null ? Number(selectedDay) : 
+                     (tripSpots.length > 0 ? Number(tripSpots[tripSpots.length - 1].day) : 1);
+    const targetDate = getCorrectDateForDay(targetDay);
+    
+    // Find the next order index for this day
+    const daySpots = tripSpots.filter(s => Number(s.day) === targetDay);
+    const nextOrderIndex = daySpots.length > 0 ? Math.max(...daySpots.map(s => Number(s.orderIndex) || 0)) + 1 : 0;
+    
     // Group updates for manual coordinate click
     setSelectedSpot({
       id: tempId,
@@ -1062,9 +1080,9 @@ const App = () => {
       lng,
       type: "itinerary",
       memo: "위치 정보를 불러오는 중입니다...",
-      day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
-      date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0],
-      orderIndex: tripSpots.length
+      day: targetDay,
+      date: targetDate,
+      orderIndex: nextOrderIndex
     });
     setSearchedPlace(null);
 
@@ -1099,17 +1117,31 @@ const App = () => {
     
     const updatedSpot = { ...target, [field]: value };
     
+    // Automatically update date if day is changed
+    if (field === 'day') {
+      updatedSpot.date = getCorrectDateForDay(value);
+    }
+    
     setTripSpots(prev => {
       const updated = prev.map(s => String(s.id) === String(id) ? updatedSpot : s);
       return updated.sort((a, b) => {
-        if (a.day !== b.day) return a.day - b.day;
-        return (a.orderIndex || 0) - (b.orderIndex || 0);
+        if (Number(a.day) !== Number(b.day)) return Number(a.day) - Number(b.day);
+        return (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0);
       });
     });
 
     if (session?.user?.id) {
       syncSpot(updatedSpot);
     }
+  };
+
+  const getCorrectDateForDay = (day) => {
+    if (!computedStartDate || !day) return new Date().toISOString().split('T')[0];
+    const start = new Date(computedStartDate);
+    start.setHours(0, 0, 0, 0);
+    const target = new Date(start);
+    target.setDate(start.getDate() + (day - 1));
+    return target.toISOString().split('T')[0];
   };
 
   const handleToggleLike = (id) => {
@@ -1256,11 +1288,21 @@ const App = () => {
 
   const handleAddRow = () => {
     if (isReadOnly) return;
+    
+    // Determine the target day: prioritize selectedDay, then last spot's day, then default to 1
+    const targetDay = selectedDay !== null ? Number(selectedDay) : 
+                     (tripSpots.length > 0 ? Number(tripSpots[tripSpots.length - 1].day) : 1);
+    const targetDate = getCorrectDateForDay(targetDay);
+    
+    // Find the next order index for this day
+    const daySpots = tripSpots.filter(s => Number(s.day) === targetDay);
+    const nextOrderIndex = daySpots.length > 0 ? Math.max(...daySpots.map(s => Number(s.orderIndex) || 0)) + 1 : 0;
+
     const newSpot = {
       id: 'temp-' + Date.now(),
-      day: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].day : 1,
-      date: tripSpots.length > 0 ? tripSpots[tripSpots.length - 1].date : new Date().toISOString().split('T')[0],
-      orderIndex: tripSpots.length,
+      day: targetDay,
+      date: targetDate,
+      orderIndex: nextOrderIndex,
       name: "새로운 장소",
       lat: mapCenter.lat,
       lng: mapCenter.lng,
@@ -1271,7 +1313,14 @@ const App = () => {
       comments: [],
       isBookmarked: false
     };
-    setTripSpots(prev => [...prev, newSpot]);
+
+    setTripSpots(prev => {
+      const updated = [...prev, newSpot];
+      return updated.sort((a, b) => {
+        if (Number(a.day) !== Number(b.day)) return Number(a.day) - Number(b.day);
+        return (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0);
+      });
+    });
     syncSpot(newSpot);
   };
 
@@ -2381,8 +2430,33 @@ const App = () => {
                   </div>
                   <div className="drawer-form">
                     <div className="drawer-row">
-                      <div className="drawer-group"><label>일차</label><input type="number" className="drawer-input" value={formInput.day} onChange={(e) => setFormInput(prev => ({ ...prev, day: parseInt(e.target.value) || 1 }))} disabled={isReadOnly} /></div>
-                      <div className="drawer-group"><label>날짜</label><input type="date" className="drawer-input" value={formInput.date} onChange={(e) => setFormInput(prev => ({ ...prev, date: e.target.value }))} disabled={isReadOnly} /></div>
+                      <div className="drawer-group">
+                        <label>일차</label>
+                        <input 
+                          type="number" 
+                          className="drawer-input" 
+                          value={formInput.day} 
+                          onChange={(e) => {
+                            const newDay = parseInt(e.target.value) || 1;
+                            setFormInput(prev => ({ 
+                              ...prev, 
+                              day: newDay,
+                              date: getCorrectDateForDay(newDay)
+                            }));
+                          }} 
+                          disabled={isReadOnly} 
+                        />
+                      </div>
+                      <div className="drawer-group">
+                        <label>날짜</label>
+                        <input 
+                          type="date" 
+                          className="drawer-input" 
+                          value={formInput.date} 
+                          onChange={(e) => setFormInput(prev => ({ ...prev, date: e.target.value }))} 
+                          disabled={isReadOnly} 
+                        />
+                      </div>
                     </div>
                     <div className="drawer-group">
                       <label>분류</label>
@@ -2408,7 +2482,13 @@ const App = () => {
                         disabled={isUploadingPhoto}
                         onClick={() => {
                           const finalSpot = { ...selectedSpot, id: Date.now(), day: formInput.day, date: formInput.date, type: formInput.type, memo: formInput.memo || selectedSpot.memo };
-                          setTripSpots(prev => [...prev, finalSpot].sort((a, b) => a.day !== b.day ? a.day - b.day : a.id - b.id));
+                          setTripSpots(prev => {
+                            const updated = [...prev, finalSpot];
+                            return updated.sort((a, b) => {
+                              if (Number(a.day) !== Number(b.day)) return Number(a.day) - Number(b.day);
+                              return (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0);
+                            });
+                          });
                           syncSpot(finalSpot); setSelectedSpot(null); setSearchedPlace(null);
                         }}
                       >
