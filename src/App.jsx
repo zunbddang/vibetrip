@@ -475,10 +475,10 @@ const App = () => {
             };
             setTripSpots(prev => {
               if (prev.find(s => s.id === newSpot.id)) return prev;
-              return [...prev, newSpot].sort((a, b) => {
-                if (a.day !== b.day) return a.day - b.day;
-                if (a.orderIndex !== b.orderIndex) return a.orderIndex - b.orderIndex;
-                return a.id - b.id;
+              const updated = [...prev, newSpot];
+              return updated.sort((a, b) => {
+                if (Number(a.day) !== Number(b.day)) return Number(a.day) - Number(b.day);
+                return (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0);
               });
             });
           } else if (payload.eventType === 'UPDATE') {
@@ -749,7 +749,7 @@ const App = () => {
       // Small delay to ensure DB propagation before letting local state be overwritten by subscription
       setTimeout(() => {
         isSyncing.current = false;
-      }, 1000);
+      }, 500);
     }
   };
 
@@ -1115,11 +1115,12 @@ const App = () => {
     const target = tripSpots.find(s => String(s.id) === String(id));
     if (!target) return;
     
-    const updatedSpot = { ...target, [field]: value };
+    const normalizedDay = Number(value);
+    const updatedSpot = { ...target, [field]: field === 'day' ? normalizedDay : value };
     
     // Automatically update date if day is changed
     if (field === 'day') {
-      updatedSpot.date = getCorrectDateForDay(value);
+      updatedSpot.date = getCorrectDateForDay(normalizedDay);
     }
     
     setTripSpots(prev => {
@@ -1327,14 +1328,16 @@ const App = () => {
   const groupSpotsByDay = useMemo(() => {
     const groups = {};
     tripSpots.forEach(spot => {
-      if (!groups[spot.day]) groups[spot.day] = { day: spot.day, date: spot.date, spots: [] };
-      groups[spot.day].spots.push(spot);
+      const d = Number(spot.day) || 1;
+      if (!groups[d]) groups[d] = { day: d, date: spot.date, spots: [] };
+      groups[d].spots.push(spot);
     });
     
-    let result = Object.values(groups).sort((a, b) => a.day - b.day);
+    let result = Object.values(groups).sort((a, b) => Number(a.day) - Number(b.day));
     
     if (selectedDay !== null) {
-      result = result.filter(g => g.day === selectedDay);
+      const target = Number(selectedDay);
+      result = result.filter(g => Number(g.day) === target);
     }
     
     return result;
@@ -2500,8 +2503,20 @@ const App = () => {
                           className="drawer-update-btn" 
                           disabled={isUploadingPhoto}
                           onClick={() => {
-                            const updatedSpot = { ...selectedSpot, ...formInput };
-                            setTripSpots(prev => prev.map(s => s.id === selectedSpot.id ? updatedSpot : s).sort((a, b) => a.day !== b.day ? a.day - b.day : a.id - b.id));
+                            const normalizedDay = Number(formInput.day);
+                            const updatedSpot = { 
+                              ...selectedSpot, 
+                              ...formInput, 
+                              day: normalizedDay,
+                              date: getCorrectDateForDay(normalizedDay) 
+                            };
+                            setTripSpots(prev => {
+                              const updated = prev.map(s => String(s.id) === String(selectedSpot.id) ? updatedSpot : s);
+                              return updated.sort((a, b) => {
+                                if (Number(a.day) !== Number(b.day)) return Number(a.day) - Number(b.day);
+                                return (Number(a.orderIndex) || 0) - (Number(b.orderIndex) || 0);
+                              });
+                            });
                             syncSpot(updatedSpot); setSelectedSpot(null);
                           }}
                         >
