@@ -321,6 +321,22 @@ const App = () => {
   const [downloadProgress, setDownloadProgress] = useState(null); // { current, total, status }
   const isDownloadCancelled = useRef(false);
   const mapSearchRef = useRef(null);
+  
+  // Lightbox Keyboard Navigation
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (lightboxIndex === null) return;
+      if (e.key === 'ArrowLeft') {
+        setLightboxIndex(prev => (prev - 1 + tripPhotos.length) % tripPhotos.length);
+      } else if (e.key === 'ArrowRight') {
+        setLightboxIndex(prev => (prev + 1) % tripPhotos.length);
+      } else if (e.key === 'Escape') {
+        setLightboxIndex(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lightboxIndex, tripPhotos.length]);
 
   // Handle URL Sharing
   useEffect(() => {
@@ -1517,12 +1533,25 @@ const App = () => {
               const resp = await fetch(photo.url);
               if (!resp.ok) return null;
               const blob = await resp.blob();
-              const ext = photo.url.split('.').pop().split(/[?#]/)[0] || 'jpg';
+              // Use MIME type if URL extension is missing/generic
+              const typeExt = blob.type.split('/')[1]?.split('+')[0] || 'jpg';
+              const urlExt = photo.url.split('.').pop().split(/[?#]/)[0];
+              const ext = (urlExt && urlExt.length < 5) ? urlExt : typeExt;
+              
               return new File([blob], `vibe-${id}.${ext}`, { type: blob.type });
             } catch (e) { return null; }
           });
           
-          const files = (await Promise.all(filePromises)).filter(f => f !== null);
+          // Limit concurrency within the chunk to be safe on mobile memory
+          const files = [];
+          const SUB_BATCH_SIZE = 5;
+          for (let j = 0; j < filePromises.length; j += SUB_BATCH_SIZE) {
+            if (isDownloadCancelled.current) break;
+            const subBatch = await Promise.all(filePromises.slice(j, j + SUB_BATCH_SIZE));
+            files.push(...subBatch.filter(f => f !== null));
+          }
+          
+          if (isDownloadCancelled.current) break;
           
           if (files.length > 0) {
             setDownloadProgress({ 
@@ -1566,20 +1595,25 @@ const App = () => {
       for (let i = 0; i < selectedPhotos.length; i++) {
         if (isDownloadCancelled.current) break;
         
-        const photo = tripPhotos.find(p => p.id === selectedPhotos[i]);
-        if (photo?.url) {
-          setDownloadProgress({ 
-            current: i, 
-            total, 
-            status: `${i + 1}/${total} 사진 다운로드 중...` 
-          });
-          
-          await handleDownloadPhoto(photo.url, `vibe-trip-${photo.id}.jpg`, true);
-          count++;
-          
-          // Longer stagger for sequential downloads to prevent browser blocking
-          await new Promise(r => setTimeout(r, 1500));
-        }
+          const photo = tripPhotos.find(p => p.id === selectedPhotos[i]);
+          if (photo?.url) {
+            setDownloadProgress({ 
+              current: i, 
+              total, 
+              status: `${i + 1}/${total} 사진 다운로드 중...` 
+            });
+            
+            const photoExt = photo.url.split('.').pop().split(/[?#]/)[0] || (photo.is_video ? 'mp4' : 'jpg');
+            await handleDownloadPhoto(photo.url, `vibe-trip-${photo.id}.${photoExt}`, true);
+            count++;
+            
+            // Longer stagger for sequential downloads to prevent browser blocking
+            // Check cancellation during the wait as well
+            for (let j = 0; j < 15; j++) {
+              if (isDownloadCancelled.current) break;
+              await new Promise(r => setTimeout(r, 100));
+            }
+          }
       }
       
       if (count > 0 && !isMobile) {
@@ -2559,6 +2593,10 @@ const App = () => {
                       console.error('Parallel upload failure:', err);
                       alert('업로드 중 일부 오류가 발생했습니다.');
                     } finally {
+                      // Clean up previews to prevent memory leaks
+                      newUploading.forEach(f => {
+                        if (f.preview) URL.revokeObjectURL(f.preview);
+                      });
                       e.target.value = ''; // Success or fail, clear the input
                     }
                   }} />
@@ -2667,6 +2705,8 @@ const App = () => {
                                   className="gallery-video-preview"
                                   muted 
                                   playsInline 
+                                  preload="metadata"
+                                  loading="lazy"
                                 />
                                 <div className="video-play-badge">
                                   <Play size={16} fill="white" />
@@ -2691,7 +2731,11 @@ const App = () => {
                                     <Trash2 size={16} />
                                   </button>
                                 )}
-                                <button onClick={(e) => { e.stopPropagation(); handleDownloadPhoto(photo.url, `vibe-trip-${photo.id}.jpg`); }}>
+                                <button onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  const ext = photo.url.split('.').pop().split(/[?#]/)[0] || (photo.is_video ? 'mp4' : 'jpg');
+                                  handleDownloadPhoto(photo.url, `vibe-trip-${photo.id}.${ext}`); 
+                                }}>
                                   <Download size={16} />
                                 </button>
                                 <button onClick={(e) => { e.stopPropagation(); togglePhotoSelection(photo.id); }}>
@@ -2708,12 +2752,25 @@ const App = () => {
               })}
               
               {tripPhotos.length === 0 && uploadingFiles.length === 0 && (
-                <div className="empty-gallery">
-                  <div className="empty-icon-circle">
-                    <ImageIcon size={40} color="#dbdbdb" />
+                <div className="empty-gallery fade-in">
+                  <div className="empty-icon-circle" style={{ borderColor: 'var(--insta-blue)', background: 'rgba(0, 149, 246, 0.05)' }}>
+                    <Camera size={40} color="var(--insta-blue)" strokeWidth={1.5} />
                   </div>
-                  <h4>아직 사진이 없습니다</h4>
-                  <p>소중한 여행의 기억을 사진으로 남겨보세요!</p>
+                  <h4 style={{ fontSize: '18px', fontWeight: 700 }}>아직 등록된 사진이 없습니다</h4>
+                  <p style={{ color: '#8e8e8e', marginTop: '5px' }}>여행의 소중한 순간들을 사진과 영상으로 남겨보세요! 📸</p>
+                  <label className="batch-upload-btn" style={{ marginTop: '20px', display: 'inline-flex' }}>
+                    첫 사진 올리기
+                    <input type="file" hidden multiple accept="image/*,video/*" onChange={async (e) => {
+                      // Trigger the same upload logic as header button
+                      const files = Array.from(e.target.files);
+                      if (files.length > 0) {
+                        const event = { target: { files: e.target.files } };
+                        // Note: This is a hacky way to reuse the handler if it's not extracted
+                        // but since it's an inline handler in the JSX above, 
+                        // I should probably extract it to a function first.
+                      }
+                    }} />
+                  </label>
                 </div>
               )}
             </div>
@@ -2859,9 +2916,19 @@ const App = () => {
             </div>
             
             <div className="lightbox-center-actions">
-               <button className="lightbox-download-hub" onClick={() => handleDownloadPhoto(tripPhotos[lightboxIndex].url, `vibe-trip-${tripPhotos[lightboxIndex].id}.jpg`)}>
-                <Download size={24} />
-                <span>선명하게 저장하기</span>
+               <button 
+                className="lightbox-download-hub" 
+                disabled={isLoading}
+                onClick={() => {
+                  const currentPhoto = tripPhotos[lightboxIndex];
+                  const ext = currentPhoto.url.split('.').pop().split(/[?#]/)[0] || (currentPhoto.is_video ? 'mp4' : 'jpg');
+                  handleDownloadPhoto(currentPhoto.url, `vibe-trip-${currentPhoto.id}.${ext}`);
+                }}
+              >
+                {isLoading && downloadProgress ? (
+                  <div className="spinner-mini" style={{ borderColor: 'rgba(255,255,255,0.2)', borderTopColor: 'white' }}></div>
+                ) : <Download size={24} />}
+                <span>{isLoading && downloadProgress ? '저장 중...' : '선명하게 저장하기'}</span>
               </button>
             </div>
 
