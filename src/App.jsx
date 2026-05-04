@@ -1442,7 +1442,18 @@ const App = () => {
 
       const ext = url.split('.').pop().split(/[?#]/)[0] || 'jpg';
       const finalFilename = filename || `vibe-trip-photo.${ext}`;
-      const file = new File([blob], finalFilename, { type: blob.type });
+      
+      let mimeType = blob.type;
+      if (!mimeType || mimeType === 'application/octet-stream') {
+        const lowerExt = ext.toLowerCase();
+        if (['jpg', 'jpeg'].includes(lowerExt)) mimeType = 'image/jpeg';
+        else if (lowerExt === 'png') mimeType = 'image/png';
+        else if (lowerExt === 'gif') mimeType = 'image/gif';
+        else if (lowerExt === 'webp') mimeType = 'image/webp';
+        else if (lowerExt === 'mp4') mimeType = 'video/mp4';
+      }
+      
+      const file = new File([blob], finalFilename, { type: mimeType });
 
       // Detect Platform
       const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -1590,7 +1601,17 @@ const App = () => {
               const urlExt = photo.url.split('.').pop().split(/[?#]/)[0];
               const ext = (urlExt && urlExt.length < 5) ? urlExt : typeExt;
               
-              return new File([blob], `vibe-${id}.${ext}`, { type: blob.type });
+              let mimeType = blob.type;
+              if (!mimeType || mimeType === 'application/octet-stream') {
+                const lowerExt = ext.toLowerCase();
+                if (['jpg', 'jpeg'].includes(lowerExt)) mimeType = 'image/jpeg';
+                else if (lowerExt === 'png') mimeType = 'image/png';
+                else if (lowerExt === 'gif') mimeType = 'image/gif';
+                else if (lowerExt === 'webp') mimeType = 'image/webp';
+                else if (lowerExt === 'mp4') mimeType = 'video/mp4';
+              }
+              
+              return new File([blob], `vibe-${id}.${ext}`, { type: mimeType });
             } catch (e) { return null; }
           });
           
